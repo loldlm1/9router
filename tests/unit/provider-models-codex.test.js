@@ -7,18 +7,19 @@ import {
   getProviderModels,
 } from "../../open-sse/config/providerModels.js";
 
-const GPT_56_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
+const GPT_56_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const GPT_56_LUNA_EFFORTS = GPT_56_EFFORTS.filter((effort) => effort !== "ultra");
 
 describe("Codex model reasoning metadata", () => {
   it.each(["sol", "terra", "luna"])("exposes GPT-5.6 %s capabilities", (variant) => {
     const model = `gpt-5.6-${variant}`;
-    expect(getModelReasoningEfforts("cx", model)).toEqual(GPT_56_EFFORTS);
+    expect(getModelReasoningEfforts("cx", model)).toEqual(variant === "luna" ? GPT_56_LUNA_EFFORTS : GPT_56_EFFORTS);
     expect(getModelReasoningModes("cx", model)).toEqual(["standard", "pro"]);
   });
 
   it.each(["sol", "terra", "luna"])("maps the GPT-5.6 %s Pro alias without leaking it upstream", (variant) => {
     const alias = `gpt-5.6-${variant}-pro`;
-    expect(getModelReasoningEfforts("cx", alias)).toEqual(GPT_56_EFFORTS);
+    expect(getModelReasoningEfforts("cx", alias)).toEqual(variant === "luna" ? GPT_56_LUNA_EFFORTS : GPT_56_EFFORTS);
     expect(getModelReasoningModes("cx", alias)).toEqual(["standard", "pro"]);
     expect(getModelReasoningMode("cx", alias)).toBe("pro");
     expect(getModelUpstreamId("cx", alias)).toBe(`gpt-5.6-${variant}`);

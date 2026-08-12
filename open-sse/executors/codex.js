@@ -137,7 +137,7 @@ function resolveCacheSessionId(body, credentials) {
   });
 }
 
-const CODEX_REASONING_EFFORT_SUFFIXES = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const CODEX_REASONING_EFFORT_SUFFIXES = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 
 function splitReasoningEffortSuffix(modelId) {
   if (typeof modelId !== "string") return { modelId, effort: null };
@@ -169,6 +169,7 @@ function normalizeReasoningEffort(value, supportedEfforts, modelId) {
   if (!value) return value;
   if (!supportedEfforts) return value === "max" ? "xhigh" : value;
   if (supportedEfforts.includes(value)) return value;
+  if (value === "ultra" && supportedEfforts.includes("max") && modelId.includes("luna")) return "max";
   throw codexRequestError(`Unsupported reasoning effort "${value}" for Codex model "${modelId}"`);
 }
 

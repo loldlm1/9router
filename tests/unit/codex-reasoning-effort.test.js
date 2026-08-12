@@ -45,8 +45,12 @@ describe("Codex reasoning effort capabilities", () => {
     expect(body.reasoning.effort).toBe("xhigh");
   });
 
-  it("rejects undeclared GPT-5.6 efforts instead of sending them upstream", () => {
-    expect(() => transform("gpt-5.6-sol", { reasoning_effort: "ultra" }))
-      .toThrow('Unsupported reasoning effort "ultra" for Codex model "gpt-5.6-sol"');
+  it.each(["sol", "terra"])("preserves Ultra for GPT-5.6 %s", (variant) => {
+    const body = transform(`gpt-5.6-${variant}`, { reasoning_effort: "ultra" });
+    expect(body.reasoning.effort).toBe("ultra");
+  });
+
+  it("maps Luna Ultra to its supported Max effort", () => {
+    expect(transform("gpt-5.6-luna", { reasoning_effort: "ultra" }).reasoning.effort).toBe("max");
   });
 });

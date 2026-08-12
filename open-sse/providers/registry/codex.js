@@ -3,8 +3,13 @@ import { withCodexReviewModels } from "../models/helpers.js";
 // Wire capabilities. ChatGPT account entitlement and internal-backend acceptance
 // are validated separately before a fork release is promoted.
 const GPT_56_REASONING = Object.freeze({
-  reasoningEfforts: Object.freeze(["none", "low", "medium", "high", "xhigh", "max"]),
+  reasoningEfforts: Object.freeze(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
   reasoningModes: Object.freeze(["standard", "pro"]),
+});
+
+const GPT_56_LUNA_REASONING = Object.freeze({
+  ...GPT_56_REASONING,
+  reasoningEfforts: Object.freeze(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
 });
 
 export default {
@@ -58,9 +63,9 @@ export default {
     { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", ...GPT_56_REASONING },
     { id: "gpt-5.6-terra-pro", name: "GPT 5.6 Terra Pro", upstreamModelId: "gpt-5.6-terra", reasoningMode: "pro", ...GPT_56_REASONING },
     { id: "gpt-5.6-terra-review", name: "GPT 5.6 Terra Review", upstreamModelId: "gpt-5.6-terra", quotaFamily: "review", ...GPT_56_REASONING },
-    { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", ...GPT_56_REASONING },
-    { id: "gpt-5.6-luna-pro", name: "GPT 5.6 Luna Pro", upstreamModelId: "gpt-5.6-luna", reasoningMode: "pro", ...GPT_56_REASONING },
-    { id: "gpt-5.6-luna-review", name: "GPT 5.6 Luna Review", upstreamModelId: "gpt-5.6-luna", quotaFamily: "review", ...GPT_56_REASONING },
+    { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", ...GPT_56_LUNA_REASONING },
+    { id: "gpt-5.6-luna-pro", name: "GPT 5.6 Luna Pro", upstreamModelId: "gpt-5.6-luna", reasoningMode: "pro", ...GPT_56_LUNA_REASONING },
+    { id: "gpt-5.6-luna-review", name: "GPT 5.6 Luna Review", upstreamModelId: "gpt-5.6-luna", quotaFamily: "review", ...GPT_56_LUNA_REASONING },
     { id: "gpt-5.5", name: "GPT 5.5" },
     { id: "gpt-5.5-review", name: "GPT 5.5 Review", upstreamModelId: "gpt-5.5", quotaFamily: "review" },
     { id: "gpt-5.4", name: "GPT 5.4" },

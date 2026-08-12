@@ -31,7 +31,16 @@ vi.mock("open-sse/utils/claudeHeaderCache.js", () => ({ cacheClaudeHeaders: vi.f
 vi.mock("@/lib/headroom/detect", () => ({ DEFAULT_HEADROOM_URL: "http://127.0.0.1:8787" }));
 vi.mock("@/lib/pxpipe/loader.js", () => ({ getTransform: vi.fn(async () => null) }));
 vi.mock("@/lib/pxpipe/events.js", () => ({ appendPxpipeEvent: vi.fn() }));
-vi.mock("open-sse/services/combo.js", () => ({ handleComboChat: vi.fn(), handleFusionChat: vi.fn() }));
+vi.mock("open-sse/services/combo.js", () => ({
+  handleComboChat: vi.fn(),
+  handleFusionChat: vi.fn(),
+  detectRequiredCapabilities: vi.fn(() => new Set()),
+}));
+vi.mock("open-sse/services/capacityAdapter.js", () => ({
+  augmentModelsWithCapacityAdapter: vi.fn((models) => models),
+  withCapacityAdapterStripping: vi.fn((handler) => handler),
+  getActiveAdapterStrategy: vi.fn(() => "fallback"),
+}));
 vi.mock("open-sse/utils/bypassHandler.js", () => ({ handleBypassRequest: vi.fn(() => null) }));
 vi.mock("@/sse/utils/logger.js", () => loggerMocks);
 vi.mock("@/sse/services/tokenRefresh.js", () => ({

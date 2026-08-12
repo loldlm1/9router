@@ -62,6 +62,12 @@ vi.mock("@/lib/pxpipe/events.js", () => ({
 vi.mock("open-sse/services/combo.js", () => ({
   handleComboChat: vi.fn(),
   handleFusionChat: vi.fn(),
+  detectRequiredCapabilities: vi.fn(() => new Set()),
+}));
+vi.mock("open-sse/services/capacityAdapter.js", () => ({
+  augmentModelsWithCapacityAdapter: vi.fn((models) => models),
+  withCapacityAdapterStripping: vi.fn((handler) => handler),
+  getActiveAdapterStrategy: vi.fn(() => "fallback"),
 }));
 vi.mock("open-sse/utils/bypassHandler.js", () => ({
   handleBypassRequest: vi.fn(() => null),
