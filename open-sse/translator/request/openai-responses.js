@@ -82,6 +82,27 @@ function applyResponsesStructuredOutputToChat(result, body) {
   delete result.text;
 }
 
+function applyChatReasoningToResponses(result, body) {
+  const source =
+    body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
+      ? { ...body.reasoning }
+      : null;
+  const hasLegacyEffort = hasOwn(body, "reasoning_effort");
+
+  if (source || hasLegacyEffort) {
+    const reasoning = source || {};
+    if (hasLegacyEffort && !hasOwn(reasoning, "effort")) {
+      reasoning.effort = body.reasoning_effort;
+    }
+    if (hasLegacyEffort && !hasOwn(reasoning, "summary")) {
+      reasoning.summary = "auto";
+    }
+    result.reasoning = reasoning;
+  }
+
+  delete result.reasoning_effort;
+}
+
 /**
  * Convert OpenAI Responses API request to OpenAI Chat Completions format
  */
@@ -378,6 +399,7 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
     }
     delete result.max_tokens;
     delete result.max_completion_tokens;
+    applyChatReasoningToResponses(result, body);
     applyChatStructuredOutputToResponses(result, body);
     return result;
   }
@@ -504,8 +526,7 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
     result.max_output_tokens = body.max_tokens;
   }
   if (body.top_p !== undefined) result.top_p = body.top_p;
-  if (body.reasoning !== undefined) result.reasoning = body.reasoning;
-  if (body.reasoning_effort !== undefined) result.reasoning = { effort: body.reasoning_effort, summary: "auto" };
+  applyChatReasoningToResponses(result, body);
   if (body.service_tier !== undefined) result.service_tier = body.service_tier;
   applyChatStructuredOutputToResponses(result, body);
   if (body.prompt_cache_key !== undefined) result.prompt_cache_key = body.prompt_cache_key;

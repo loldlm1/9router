@@ -32,6 +32,7 @@ import { defaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { FALLBACK_SCOPE_REQUEST, normalizeFallbackScope } from "../services/fallbackScope.js";
 import { formatCodexDecisionLog } from "../utils/codexObservability.js";
+import { isCodexAstraModel } from "../config/codexConstants.js";
 
 function logCodexDecision({ log, provider, model, upstreamModel, requestBody, upstreamBody, compact, status, fallbackScope }) {
   if (provider !== "codex" || !log?.info) return;
@@ -189,7 +190,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (passthrough) {
     log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
     translatedBody = { ...body, model: stripThinkingSuffix(upstreamModel) };
-    if (provider === "codex") {
+    if (provider === "codex" && !isCodexAstraModel(upstreamModel)) {
       const suffixThinking = {};
       applyThinking(sourceFormat, upstreamModel, suffixThinking, provider);
       if (suffixThinking.reasoning_effort) {

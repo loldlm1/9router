@@ -210,6 +210,46 @@ describe("OpenAI structured-output request translation", () => {
     expect(body).toEqual(before);
   });
 
+  it("merges legacy effort with native mode and summary alongside routing fields", () => {
+    const body = chatBody(
+      {
+        type: "json_schema",
+        json_schema: { name: "astra_result", schema, strict: true },
+      },
+      {
+        reasoning: { mode: "pro", summary: "detailed" },
+        reasoning_effort: "max",
+        prompt_cache_key: "astra-cache",
+        service_tier: "fast",
+      },
+    );
+
+    const result = openaiToOpenAIResponsesRequest("gpt-6-astra", body, true);
+
+    expect(result.reasoning).toEqual({ effort: "max", mode: "pro", summary: "detailed" });
+    expect(result.prompt_cache_key).toBe("astra-cache");
+    expect(result.service_tier).toBe("fast");
+    expect(result.text.format).toMatchObject({ type: "json_schema", name: "astra_result", strict: true });
+    expect(result).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("uses native reasoning effort before legacy effort on input-native requests", () => {
+    const body = responsesBody(
+      { type: "json_object" },
+      {
+        reasoning: { effort: "high", mode: "standard", summary: "detailed" },
+        reasoning_effort: "max",
+      },
+    );
+    const before = structuredClone(body);
+
+    const result = openaiToOpenAIResponsesRequest("gpt-6-astra", body, true);
+
+    expect(result.reasoning).toEqual({ effort: "high", mode: "standard", summary: "detailed" });
+    expect(result).not.toHaveProperty("reasoning_effort");
+    expect(body).toEqual(before);
+  });
+
   it("does not mutate either source body", () => {
     const chat = chatBody({
       type: "json_schema",

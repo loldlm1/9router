@@ -1,4 +1,4 @@
-import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from "../../config/codexConstants.js";
+import { CODEX_ASTRA_MODEL_ID, CODEX_ORIGINATOR, CODEX_USER_AGENT } from "../../config/codexConstants.js";
 
 // Wire capabilities. ChatGPT account entitlement and internal-backend acceptance
 // are validated separately before a fork release is promoted.
@@ -62,9 +62,9 @@ export default {
     },
   },
   models: [
-    { id: "gpt-6-astra", name: "GPT-6 Astra", ...GPT_6_ASTRA_REASONING },
-    { id: "gpt-6-astra-pro", name: "GPT-6 Astra Pro", upstreamModelId: "gpt-6-astra", reasoningMode: "pro", ...GPT_6_ASTRA_REASONING },
-    { id: "gpt-6-astra-review", name: "GPT-6 Astra Review", upstreamModelId: "gpt-6-astra", quotaFamily: "review", ...GPT_6_ASTRA_REASONING },
+    { id: CODEX_ASTRA_MODEL_ID, name: "GPT-6 Astra", ...GPT_6_ASTRA_REASONING },
+    { id: `${CODEX_ASTRA_MODEL_ID}-pro`, name: "GPT-6 Astra Pro", upstreamModelId: CODEX_ASTRA_MODEL_ID, reasoningMode: "pro", ...GPT_6_ASTRA_REASONING },
+    { id: `${CODEX_ASTRA_MODEL_ID}-review`, name: "GPT-6 Astra Review", upstreamModelId: CODEX_ASTRA_MODEL_ID, quotaFamily: "review", ...GPT_6_ASTRA_REASONING },
     { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", ...GPT_56_REASONING },
     { id: "gpt-5.6-sol-pro", name: "GPT 5.6 Sol Pro", upstreamModelId: "gpt-5.6-sol", reasoningMode: "pro", ...GPT_56_REASONING },
     { id: "gpt-5.6-sol-review", name: "GPT 5.6 Sol Review", upstreamModelId: "gpt-5.6-sol", quotaFamily: "review", ...GPT_56_REASONING },

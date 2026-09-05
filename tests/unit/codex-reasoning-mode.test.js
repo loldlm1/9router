@@ -115,3 +115,52 @@ describe("Codex GPT-5.6 reasoning modes", () => {
     expect(calls[1].body.reasoning.mode).toBeUndefined();
   });
 });
+
+describe("Codex GPT-6 Astra reasoning modes", () => {
+  it.each([
+    ["gpt-6-astra", "standard", "low"],
+    ["gpt-6-astra", "pro", "max"],
+    ["gpt-6-astra-review", "standard", "xhigh"],
+    ["gpt-6-astra-review", "pro", "medium"],
+    ["gpt-6-astra-pro", "standard", "high"],
+    ["gpt-6-astra-pro", "pro", "low"],
+  ])("keeps %s mode %s independent from effort %s", (requestedModel, mode, effort) => {
+    const { body } = transform(requestedModel, {
+      reasoning: { effort, mode, summary: "detailed" },
+    });
+
+    expect(body.model).toBe("gpt-6-astra");
+    expect(body.reasoning).toEqual({ effort, mode, summary: "detailed" });
+  });
+
+  it("presets Pro mode without changing the default effort", () => {
+    const { body } = transform("gpt-6-astra-pro");
+
+    expect(body.reasoning).toEqual({ effort: "low", summary: "auto", mode: "pro" });
+  });
+
+  it("merges legacy effort into native mode and summary", () => {
+    const { body } = transform("gpt-6-astra", {
+      reasoning_effort: "max",
+      reasoning: { mode: "pro", summary: "detailed" },
+    });
+
+    expect(body.reasoning).toEqual({ effort: "max", mode: "pro", summary: "detailed" });
+  });
+
+  it.each(["", "turbo", "Pro", " pro ", null])("rejects unsupported Astra mode %j", (mode) => {
+    expect(() => transform("gpt-6-astra-pro", { reasoning: { mode } }))
+      .toThrow(`Unsupported reasoning mode "${String(mode)}" for Codex model "gpt-6-astra-pro"`);
+  });
+
+  it("keeps compact routing independent from Astra Pro mode", () => {
+    const { body, executor } = transform("gpt-6-astra-pro(max)", {
+      _compact: true,
+      reasoning: { mode: "standard" },
+    });
+
+    expect(executor.buildUrl(body.model, true)).toBe("https://chatgpt.com/backend-api/codex/responses/compact");
+    expect(body.model).toBe("gpt-6-astra");
+    expect(body.reasoning).toEqual({ effort: "max", mode: "standard", summary: "auto" });
+  });
+});

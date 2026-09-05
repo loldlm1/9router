@@ -138,16 +138,49 @@ function resolveCacheSessionId(body, credentials) {
 }
 
 const CODEX_REASONING_EFFORT_SUFFIXES = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const isObjectRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 
 function splitReasoningEffortSuffix(modelId) {
-  if (typeof modelId !== "string") return { modelId, effort: null };
+  if (typeof modelId !== "string") return { modelId, effort: null, hasEffort: false };
+
+  const parenthesized = modelId.match(/^(.*)\(([^()]*)\)\s*$/);
+  if (parenthesized) {
+    return {
+      modelId: parenthesized[1].trim(),
+      effort: parenthesized[2],
+      hasEffort: true,
+    };
+  }
+
+  // An exact configured model such as "gpt-5.6-sol-pro" is not a suffix form.
+  if (getModelReasoningEfforts("cx", modelId)) {
+    return { modelId, effort: null, hasEffort: false };
+  }
+
   for (const effort of CODEX_REASONING_EFFORT_SUFFIXES) {
     const suffix = `-${effort}`;
     if (modelId.endsWith(suffix)) {
-      return { modelId: modelId.slice(0, -suffix.length), effort };
+      return { modelId: modelId.slice(0, -suffix.length), effort, hasEffort: true };
     }
   }
-  return { modelId, effort: null };
+
+  // When the base route has an explicit effort contract, treat any remaining
+  // hyphen tail as an attempted suffix so invalid values fail locally.
+  let separator = modelId.lastIndexOf("-");
+  while (separator > 0) {
+    const baseId = modelId.slice(0, separator);
+    if (getModelReasoningEfforts("cx", baseId)) {
+      return {
+        modelId: baseId,
+        effort: modelId.slice(separator + 1),
+        hasEffort: true,
+      };
+    }
+    separator = modelId.lastIndexOf("-", separator - 1);
+  }
+
+  return { modelId, effort: null, hasEffort: false };
 }
 
 export function classifyCodexFallbackScope(status, message = "") {
@@ -166,17 +199,20 @@ function codexRequestError(message) {
 }
 
 function normalizeReasoningEffort(value, supportedEfforts, modelId) {
+  if (supportedEfforts) {
+    if (supportedEfforts.includes(value)) return value;
+    if (value === "ultra" && supportedEfforts.includes("max") && modelId.includes("luna")) return "max";
+    throw codexRequestError(`Unsupported reasoning effort "${String(value)}" for Codex model "${modelId}"`);
+  }
   if (!value) return value;
-  if (!supportedEfforts) return value === "max" ? "xhigh" : value;
-  if (supportedEfforts.includes(value)) return value;
-  if (value === "ultra" && supportedEfforts.includes("max") && modelId.includes("luna")) return "max";
-  throw codexRequestError(`Unsupported reasoning effort "${value}" for Codex model "${modelId}"`);
+  if (value === "max") return "xhigh";
+  return value;
 }
 
-function normalizeReasoningMode(value, supportedModes, modelId) {
-  if (value == null || value === "") return null;
+function normalizeReasoningMode(value, supportedModes, modelId, supplied = false) {
+  if (!supplied && (value == null || value === "")) return null;
   if (!supportedModes || supportedModes.includes(value)) return value;
-  throw codexRequestError(`Unsupported reasoning mode "${value}" for Codex model "${modelId}"`);
+  throw codexRequestError(`Unsupported reasoning mode "${String(value)}" for Codex model "${modelId}"`);
 }
 
 function findNestedMessage(value, depth = 0) {
@@ -493,26 +529,36 @@ export class CodexExecutor extends BaseExecutor {
     const aliasMode = getModelReasoningMode("cx", requested.modelId);
     body.model = getModelUpstreamId("cx", requested.modelId);
 
-    // Priority: explicit reasoning.effort > reasoning_effort param > model suffix > default (medium)
-    const explicitEffort = body.reasoning && typeof body.reasoning === "object"
-      ? body.reasoning.effort
-      : null;
+    // Priority: explicit reasoning.effort > reasoning_effort > suffix > default.
+    const reasoning = isObjectRecord(body.reasoning) ? body.reasoning : {};
+    const hasExplicitEffort = hasOwn(reasoning, "effort");
+    const hasLegacyEffort = hasOwn(body, "reasoning_effort");
+    const requestedEffort = hasExplicitEffort
+      ? reasoning.effort
+      : hasLegacyEffort
+        ? body.reasoning_effort
+        : requested.hasEffort
+          ? requested.effort
+          : "low";
     const effort = normalizeReasoningEffort(
-      explicitEffort || body.reasoning_effort || requested.effort || "low",
+      requestedEffort,
       supportedEfforts,
       requested.modelId,
     );
-    if (!body.reasoning || typeof body.reasoning !== "object") body.reasoning = {};
+    body.reasoning = reasoning;
     body.reasoning.effort = effort;
-    if (!body.reasoning.summary) body.reasoning.summary = "auto";
+    if (!hasOwn(body.reasoning, "summary")) body.reasoning.summary = "auto";
     delete body.reasoning_effort;
 
     // Mode and effort are independent axes. An explicit client mode wins over
     // virtual-alias metadata; Standard remains the upstream default when omitted.
+    const hasExplicitMode = hasOwn(body.reasoning, "mode");
+    const requestedMode = hasExplicitMode ? body.reasoning.mode : aliasMode;
     const mode = normalizeReasoningMode(
-      body.reasoning.mode || aliasMode,
+      requestedMode,
       supportedModes,
       requested.modelId,
+      hasExplicitMode || aliasMode != null,
     );
     if (mode) body.reasoning.mode = mode;
     else delete body.reasoning.mode;

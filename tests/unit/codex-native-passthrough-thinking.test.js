@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CodexExecutor } from "../../open-sse/executors/codex.js";
 
 const { executeMock, forcedSSEToJsonMock } = vi.hoisted(() => ({
   executeMock: vi.fn(),
@@ -43,7 +44,7 @@ async function runNativeCodexRequest(model, reasoning) {
     ...(reasoning ? { reasoning } : {}),
   };
 
-  await handleChatCore({
+  const result = await handleChatCore({
     body,
     modelInfo: { provider: "codex", model },
     credentials: { accessToken: "test-token", providerSpecificData: {} },
@@ -65,17 +66,20 @@ async function runNativeCodexRequest(model, reasoning) {
     },
   });
 
-  return executeMock.mock.calls.at(-1)[0].body;
+  return { body: executeMock.mock.calls.at(-1)?.[0]?.body, result };
 }
 
 describe("native Codex passthrough thinking suffixes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    executeMock.mockResolvedValue({
-      response: new Response("", { status: 200 }),
-      url: "https://chatgpt.com/backend-api/codex/responses",
-      headers: {},
-      transformedBody: null,
+    executeMock.mockImplementation(async ({ model, body, stream, credentials }) => {
+      const transformedBody = new CodexExecutor().transformRequest(model, body, stream, credentials);
+      return {
+        response: new Response("", { status: 200 }),
+        url: "https://chatgpt.com/backend-api/codex/responses",
+        headers: {},
+        transformedBody,
+      };
     });
     forcedSSEToJsonMock.mockResolvedValue({
       success: true,
@@ -84,14 +88,14 @@ describe("native Codex passthrough thinking suffixes", () => {
   });
 
   it("forwards Ultra for Sol", async () => {
-    const body = await runNativeCodexRequest("gpt-5.6-sol(ultra)");
+    const { body } = await runNativeCodexRequest("gpt-5.6-sol(ultra)");
 
     expect(body.model).toBe("gpt-5.6-sol");
-    expect(body.reasoning).toEqual({ effort: "ultra" });
+    expect(body.reasoning).toEqual({ effort: "ultra", summary: "auto" });
   });
 
   it("converts unsupported Luna Ultra to Max without dropping reasoning metadata", async () => {
-    const body = await runNativeCodexRequest("gpt-5.6-luna(ultra)", {
+    const { body } = await runNativeCodexRequest("gpt-5.6-luna(ultra)", {
       effort: "low",
       summary: "detailed",
     });
@@ -101,11 +105,44 @@ describe("native Codex passthrough thinking suffixes", () => {
   });
 
   it("forwards Ultra through a Terra review alias", async () => {
-    const body = await runNativeCodexRequest("gpt-5.6-terra-review(ultra)", {
+    const { body } = await runNativeCodexRequest("gpt-5.6-terra-review(ultra)", {
       effort: "low",
     });
 
     expect(body.model).toBe("gpt-5.6-terra");
-    expect(body.reasoning).toEqual({ effort: "ultra" });
+    expect(body.reasoning).toEqual({ effort: "ultra", summary: "auto" });
+  });
+
+  it.each([
+    ["gpt-6-astra(max)", "max", undefined],
+    ["gpt-6-astra-pro(low)", "low", "pro"],
+    ["gpt-6-astra-review-xhigh", "xhigh", undefined],
+  ])("normalizes native Astra route %s", async (model, effort, mode) => {
+    const { body } = await runNativeCodexRequest(model);
+
+    expect(body.model).toBe("gpt-6-astra");
+    expect(body.reasoning).toEqual({
+      effort,
+      summary: "auto",
+      ...(mode ? { mode } : {}),
+    });
+  });
+
+  it("keeps explicit native Astra effort ahead of a suffix", async () => {
+    const { body } = await runNativeCodexRequest("gpt-6-astra-review-low", {
+      effort: "max",
+      mode: "pro",
+      summary: "detailed",
+    });
+
+    expect(body.model).toBe("gpt-6-astra");
+    expect(body.reasoning).toEqual({ effort: "max", mode: "pro", summary: "detailed" });
+  });
+
+  it("returns an offline request-scoped error for invalid Astra suffixes", async () => {
+    const { result } = await runNativeCodexRequest("gpt-6-astra(ultra)");
+
+    expect(result).toMatchObject({ success: false, status: 400, fallbackScope: "request" });
+    expect(result.error).toContain("Unsupported reasoning effort");
   });
 });

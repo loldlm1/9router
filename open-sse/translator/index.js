@@ -8,6 +8,7 @@ import { applyThinking, captureThinking } from "./concerns/thinkingUnified.js";
 import { captureSessionId } from "../utils/sessionManager.js";
 import { AntigravityExecutor } from "../executors/antigravity.js";
 import { PROVIDERS } from "../providers/index.js";
+import { isCodexAstraModel } from "../config/codexConstants.js";
 
 // Registry for translators. Lazy-init guards against circular-import order:
 // translator modules call register() (side-effect) before this module's body runs.
@@ -115,7 +116,11 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   const kiroThinkingMappedByTranslator =
     targetFormat === FORMATS.KIRO &&
     (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE);
-  if (!kiroThinkingMappedByTranslator) {
+  const astraThinkingOwnedByExecutor =
+    provider === "codex" &&
+    targetFormat === FORMATS.OPENAI_RESPONSES &&
+    isCodexAstraModel(model);
+  if (!kiroThinkingMappedByTranslator && !astraThinkingOwnedByExecutor) {
     applyThinking(targetFormat, model, result, provider, thinkingIntent);
   }
 
