@@ -73,7 +73,6 @@ and stream factories so account fallback shares a request ID and each fetch gets
 an attempt ordinal. This is instrumentation only; startup, terminal, and timeout
 corrections are implemented in the subsequent ordered sprints.
 
-The implementation plan is `codex-long-task-stream-reliability-plan.md`.
 Independent timed/client verification on the VPS was not recorded. No incident
 logs from the local workstation are used as evidence for the VPS-only report.
 
@@ -306,7 +305,7 @@ selected Astra model and reasoning settings.
 
 After manual startup, record the deployed revision, build/runtime and affected
 Codex version, origin/public routes, ingress limits, and outbound proxy mode
-using the worksheet. Then complete plan Tasks 5.2 and 5.3: both Responses route
+using the worksheet. Optional follow-up checks cover both Responses route
 aliases, a timed stream of at least 12 minutes through origin/public ingress,
 actual parser behavior with heartbeat comments, cancellation followed by another
 request, controlled reconnect/next-step recovery, and the 30-minute live-task
@@ -414,9 +413,9 @@ explain why changing the root module type would also affect CommonJS `.js` files
 ## Thread closeout
 
 On 2026-09-05, the completed disposable active-plan state and this thread's old
-compaction snapshot were removed from `.codex-hook-state/`. The retained plan
-and this runbook are the durable record; a new task should initialize fresh
-execution state only when its own plan is authorized.
+compaction snapshot were removed from `.codex-hook-state/`. The completed planner
+document was also removed. This runbook and Git history retain the execution
+record; a new task should initialize fresh state only when its own plan is authorized.
 
 Task-specific builds `.next-cli-build/stream-reliability/` and
 `.next-cli-build/module-warning/`, plus the remaining synthetic data/smoke
