@@ -99,7 +99,7 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, diagnostics = null, retryBudget = null }) {
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, diagnostics = null, retryBudget = null, transportPolicy = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -154,7 +154,7 @@ export class BaseExecutor {
           headers,
           body: bodyStr,
           signal: mergedSignal
-        }, proxyOptions);
+        }, proxyOptions, transportPolicy);
         clearTimeout(connectTimer);
         diagnostics?.headers(response.status);
         if (diagnostics && response.body) {

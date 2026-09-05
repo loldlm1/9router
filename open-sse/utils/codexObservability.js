@@ -1,6 +1,7 @@
 import { FALLBACK_SCOPE_ACCOUNT, normalizeFallbackScope } from "../services/fallbackScope.js";
 import { CODEX_STREAM_DIAGNOSTICS, getCodexAstraRouteId, isCodexAstraModel } from "../config/codexConstants.js";
 import { randomUUID } from "node:crypto";
+import { CODEX_SSE_PEEK_TIMEOUT_MS, CODEX_STREAM_STALL_TIMEOUT_MS, CODEX_STREAM_HEARTBEAT_MS, CODEX_TRANSPORT_TIMEOUTS } from "../config/runtimeConfig.js";
 
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const ASTRA_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -126,7 +127,14 @@ export function createCodexStreamDiagnostics({ log, now = Date.now } = {}) {
   };
   reset();
   const elapsed = () => Math.max(0, now() - requestStartedAt);
-  const snapshot = () => ({ ...state, elapsed_ms: elapsed() });
+  const snapshot = () => ({ ...state, elapsed_ms: elapsed(), policy: {
+    preflight_ms: CODEX_SSE_PEEK_TIMEOUT_MS,
+    upstream_read_idle_ms: CODEX_STREAM_STALL_TIMEOUT_MS,
+    heartbeat_ms: CODEX_STREAM_HEARTBEAT_MS,
+    connect_ms: CODEX_TRANSPORT_TIMEOUTS.connectTimeoutMs,
+    headers_ms: CODEX_TRANSPORT_TIMEOUTS.headersTimeoutMs,
+    body_idle_ms: CODEX_TRANSPORT_TIMEOUTS.bodyTimeoutMs,
+  } });
   const emit = (outcome, error) => {
     const record = { ...snapshot(), outcome, ...(error ? classifyCodexStreamError(error) : {}) };
     try {

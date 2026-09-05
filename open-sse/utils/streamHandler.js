@@ -1,6 +1,7 @@
 // Stream handler with disconnect detection - shared for all providers
 import { STREAM_STALL_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
+import { CODEX_STREAM_HEARTBEAT_FRAME } from "../config/codexConstants.js";
 
 // Get HH:MM:SS timestamp
 function getTimeString() {
@@ -72,16 +73,22 @@ export function createStreamController({ onDisconnect, onError, onComplete, log,
  * for long periods while raw bytes still flow (e.g. Kiro EventStream
  * binary frames buffering, Claude reasoning streams).
  */
-export function createDisconnectAwareStream(transformStream, streamController, onAbortTerminal = null, responsesLifecycle = null) {
+export function createDisconnectAwareStream(transformStream, streamController, onAbortTerminal = null, responsesLifecycle = null, heartbeatMs = 0) {
   const reader = transformStream.readable.getReader();
   const writer = transformStream.writable.getWriter();
   let terminalEmitted = false;
   let cancelled = false;
+  let pendingRead;
+  let heartbeatTimer;
+  const clearHeartbeat = () => { clearTimeout(heartbeatTimer); heartbeatTimer = null; };
   let cleanupPromise;
-  const cleanup = () => cleanupPromise ||= Promise.allSettled([reader.cancel(), writer.abort()]).then(() => {
-    reader.releaseLock();
-    writer.releaseLock?.();
-  });
+  const cleanup = () => {
+    clearHeartbeat();
+    return cleanupPromise ||= Promise.allSettled([reader.cancel(), writer.abort()]).then(() => {
+      reader.releaseLock();
+      writer.releaseLock?.();
+    });
+  };
   const forward = (controller, bytes) => {
     controller.enqueue(bytes);
     streamController.diagnostics?.downstream(bytes);
@@ -106,8 +113,19 @@ export function createDisconnectAwareStream(transformStream, streamController, o
         return;
       }
       try {
-        const { done, value } = await reader.read();
+        pendingRead ||= reader.read();
+        const next = heartbeatMs > 0
+          ? await Promise.race([pendingRead, new Promise((resolve) => { heartbeatTimer = setTimeout(() => resolve(null), heartbeatMs); })])
+          : await pendingRead;
+        clearHeartbeat();
         if (cancelled) return;
+        if (!next) {
+          // One queued comment at most: no timer runs while downstream is full.
+          forward(controller, new TextEncoder().encode(CODEX_STREAM_HEARTBEAT_FRAME));
+          return;
+        }
+        pendingRead = null;
+        const { done, value } = next;
         if (done) {
           if (responsesLifecycle && !responsesLifecycle.deliveredTerminal) emitTerminal(controller);
           const outcome = responsesLifecycle?.deliveredTerminal || (responsesLifecycle ? "failed" : "eof");
@@ -126,6 +144,7 @@ export function createDisconnectAwareStream(transformStream, streamController, o
           await cleanup();
         }
       } catch (error) {
+        clearHeartbeat();
         if (cancelled) return;
         const wasConnected = streamController.isConnected();
         streamController.handleError(error);
@@ -167,7 +186,7 @@ export function createDisconnectAwareStream(transformStream, streamController, o
  * @param {TransformStream} transformStream - Transform stream for SSE
  * @param {object} streamController - Stream controller from createStreamController
  */
-export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS, responsesLifecycle = null) {
+export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS, responsesLifecycle = null, heartbeatMs = 0) {
   let stallTimer = null;
   let chunkCount = 0;
   let totalBytes = 0;
@@ -222,14 +241,23 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     flush() { dbg(tag, `upstream EOF | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); }
   });
 
-  const transformedBody = providerResponse.body
-    .pipeThrough(upstreamTap, { signal: streamController.signal })
-    .pipeThrough(transformStream, { signal: streamController.signal });
+  let transformedBody;
+  try {
+    transformedBody = providerResponse.body
+      .pipeThrough(upstreamTap, { signal: streamController.signal })
+      .pipeThrough(transformStream, { signal: streamController.signal });
+  } catch (error) {
+    clearStall();
+    streamController.handleError(error);
+    streamController.abort();
+    throw error;
+  }
 
   return createDisconnectAwareStream(
     { readable: transformedBody, writable: { getWriter: () => ({ abort: () => Promise.resolve() }) } },
     wrappedController,
     onAbortTerminal,
-    responsesLifecycle
+    responsesLifecycle,
+    heartbeatMs
   );
 }

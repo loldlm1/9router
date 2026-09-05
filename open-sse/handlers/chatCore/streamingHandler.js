@@ -3,11 +3,11 @@ import { needsTranslation } from "../../translator/index.js";
 import { createSSETransformStreamWithLogger, createPassthroughStreamWithLogger } from "../../utils/stream.js";
 import { pipeWithDisconnect } from "../../utils/streamHandler.js";
 import { PROVIDERS } from "../../config/providers.js";
-import { STREAM_STALL_TIMEOUT_MS } from "../../config/runtimeConfig.js";
+import { STREAM_STALL_TIMEOUT_MS, CODEX_STREAM_STALL_TIMEOUT_MS, CODEX_STREAM_HEARTBEAT_MS } from "../../config/runtimeConfig.js";
 import { createResponsesStreamLifecycle } from "../../utils/responsesStreamHelpers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
-import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
+import { SSE_HEADERS_CORS as SSE_HEADERS, SSE_HEADERS_CODEX_RESPONSES } from "../../utils/sseConstants.js";
 
 // Codex returns Responses API SSE → which client format to translate INTO, by request sourceFormat.
 // Gemini-family all map to ANTIGRAVITY decoder; unknown sources fall back to OPENAI.
@@ -94,8 +94,9 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
 
   // Responses passthrough: synthesize response.failed + [DONE] if the stream aborts/stalls before a terminal event
   const onAbortTerminal = responsesLifecycle ? () => responsesLifecycle.failureBytes() : null;
-  const stallTimeoutMs = PROVIDERS[provider]?.stallTimeoutMs || STREAM_STALL_TIMEOUT_MS;
-  const transformedBody = pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal, stallTimeoutMs, responsesLifecycle);
+  const stallTimeoutMs = provider === "codex" ? CODEX_STREAM_STALL_TIMEOUT_MS : (PROVIDERS[provider]?.stallTimeoutMs || STREAM_STALL_TIMEOUT_MS);
+  const codexResponses = provider === "codex" && isResponsesPassthrough;
+  const transformedBody = pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal, stallTimeoutMs, responsesLifecycle, codexResponses ? CODEX_STREAM_HEARTBEAT_MS : 0);
 
   const initialDetail = buildRequestDetail({
     provider, model, connectionId,
@@ -113,7 +114,7 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
 
   return {
     success: true,
-    response: new Response(transformedBody, { headers: SSE_HEADERS })
+    response: new Response(transformedBody, { headers: codexResponses ? SSE_HEADERS_CODEX_RESPONSES : SSE_HEADERS })
   };
 }
 

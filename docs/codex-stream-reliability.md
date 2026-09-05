@@ -35,9 +35,11 @@ a health check does not validate streaming.
 | 1 | 38 tests passed across diagnostics, capacity, fallback, and native reasoning; diagnostics rerun passed after always-visible failure logging | `9f57d45c` |
 | 2 | 63 tests passed across terminal/framing, abort/outcome, diagnostics, lifecycle, native reasoning, and non-streaming suites; whitespace check passed | `8dc5f120` |
 | 3 | 71 tests passed across 10 startup, cancellation, capacity/fallback, admission, lifecycle, image, and concurrency suites; whitespace check passed | `4f1419b1` |
+| 4 | 84 tests passed across 8 timeout, heartbeat, framing, startup/cancellation, diagnostic, and base-retry suites; native loopback body/header timeout checks passed | `30d00735` |
 
 Sprint 1 commit: `8dc5f120`. Sprint 2 commit: `4f1419b1`; rollback parent
 `8dc5f120`.
+Sprint 3 commit: `30d00735`; rollback parent `4f1419b1`.
 
 Responses passthrough now uses the same framed stream path for Codex, Droid,
 and other user agents. Only a complete, valid terminal settles successfully.
@@ -108,3 +110,63 @@ credentials, and persistence. No live provider is contacted. Revert this sprint
 as a unit to `4f1419b1` after reverting later dependencies and draining streams.
 Shorter preflight intentionally exposes later provider failures to client
 recovery; the deployed client still needs the Sprint 5 check.
+
+## Timeout and liveness policy
+
+| Boundary | Default and control | Meaning |
+| --- | --- | --- |
+| Codex preflight | 1000 ms, `CODEX_SSE_PEEK_TIMEOUT_MS` | Maximum startup peek, not model time to first token |
+| TCP/TLS connection | 10000 ms, `CODEX_FETCH_CONNECT_TIMEOUT_MS` (1..120000) | Connection setup to origin/proxy |
+| Response headers | 60000 ms, `FETCH_CONNECT_TIMEOUT_MS` | Existing outer fetch deadline and Codex dispatcher header budget |
+| Router upstream reads | 360000 ms, `CODEX_STREAM_STALL_TIMEOUT_MS` (1..86400000) | Falls back to `STREAM_STALL_TIMEOUT_MS`, capped at 24 hours |
+| HTTP body inactivity | 390000 ms, `CODEX_FETCH_BODY_TIMEOUT_MS` | Always at least router idle + 30000 ms cleanup margin; maximum configured value 86430000 |
+| Downstream comments | 15000 ms, `CODEX_STREAM_HEARTBEAT_MS` (0..60000) | `0` disables comments; never resets the upstream watchdog |
+| Codex SSE idle | Current documented default 300000 ms | Selected provider's `stream_idle_timeout_ms`; deployed value/parser unknown |
+| Ingress idle/hard duration | Unknown until VPS inspection | Distinct hop; comments cannot extend a hard duration cap |
+
+The `CODEX_STREAM` safe policy fields show resolved defaults/overrides. New Codex
+environment values require finite integers in the documented range; invalid
+values use defaults. Header timing does not impose a total response duration.
+Node server `requestTimeout` and `keepAliveTimeout` are not substitutes for an
+active SSE response timeout.
+
+Codex Responses use reused scoped Undici dispatchers for direct, HTTP(S) proxy,
+and relay requests. The timeout values are set on each dispatch as well as the
+pool. A configured proxy failure does not fall through to a direct retry.
+Relays retain target/path headers and use the configured egress for the relay
+hop. Other providers' fetch policy is unchanged. TLS verification remains on.
+The scoped cache retains at most 20 pools; evicted pools close after existing
+requests drain instead of abandoning their sockets. Retiring active pools can
+temporarily exceed the cache size. Drain before replacing a serving process.
+
+For Responses passthrough, `: keepalive` comments appear only between complete
+SSE frames. At most one comment can queue while a client stops reading. Comments
+do not add content, usage, first-token timing, or upstream progress. The response
+adds `X-Accel-Buffering: no` and `Cache-Control: no-cache, no-transform` while
+preserving CORS. Application read inactivity can include downstream backpressure;
+it must not be presented as proof that no network packet arrived upstream.
+
+Calibration requires the affected Codex build: verify whether comments count
+as idle activity. If they do not, choose a finite provider idle budget greater
+than the permitted semantic-event gap and router failure-delivery budget. For
+the defaults, 450000 ms is a candidate to measure, not an applied configuration.
+Keep Astra and its reasoning selection unchanged. Do not raise retry counts to
+hide broken streams. Identify the actual ingress before applying its equivalent
+buffering/read-timeout configuration; no nginx or CDN is assumed here.
+
+Sprint 4 tested Node `24.6.0`, bundled Undici `7.13.0`, npm Undici `7.29.0`,
+and Next.js `16.2.12`. Real native fetch produced `UND_ERR_BODY_TIMEOUT` in one
+controlled run each through direct, connection proxy, environment proxy, and
+relay paths, and `UND_ERR_HEADERS_TIMEOUT` before headers. This is loopback
+evidence, not evidence of the deployed runtime or TLS ingress behavior.
+No tests changed client or VPS settings. Roll back to `30d00735` as a coherent
+sprint, restore prior settings, and recycle the process after drain. Heartbeat
+can also be disabled for new requests with `CODEX_STREAM_HEARTBEAT_MS=0`.
+
+Official references rechecked 2026-09-05:
+[Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
+[Undici Client](https://github.com/nodejs/undici/blob/main/docs/docs/api/Client.md),
+[Dispatcher close](https://github.com/nodejs/undici/blob/main/docs/docs/api/Dispatcher.md),
+[ProxyAgent](https://github.com/nodejs/undici/blob/main/docs/docs/api/ProxyAgent.md).
+Installed-runtime socket tests determine the behavior of the candidate; current
+upstream documentation does not establish the VPS version or effective settings.

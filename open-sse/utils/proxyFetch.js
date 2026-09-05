@@ -1,9 +1,47 @@
 import { Readable } from "stream";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 import { dbg } from "./debugLog.js";
+import { Agent, Client, ProxyAgent } from "undici";
 
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
+const codexDispatchers = new Map();
+
+export function getCodexDispatcher(proxyUrl, policy) {
+  const normalized = normalizeProxyUrl(proxyUrl);
+  const key = JSON.stringify([normalized, policy.connectTimeoutMs, policy.headersTimeoutMs, policy.bodyTimeoutMs]);
+  if (!codexDispatchers.has(key)) {
+    if (codexDispatchers.size >= MEMORY_CONFIG.proxyDispatchersMaxSize) {
+      const oldest = codexDispatchers.keys().next().value;
+      const retired = codexDispatchers.get(oldest);
+      codexDispatchers.delete(oldest);
+      void retired.close().catch(() => {});
+    }
+    const options = { connectTimeout: policy.connectTimeoutMs, headersTimeout: policy.headersTimeoutMs, bodyTimeout: policy.bodyTimeoutMs };
+    const agent = normalized ? new ProxyAgent({
+      uri: normalized, ...options,
+      proxyTls: { timeout: policy.connectTimeoutMs },
+      requestTls: { timeout: policy.connectTimeoutMs },
+      clientFactory: (origin, connectionOptions) => new Client(origin, { ...connectionOptions, headersTimeout: policy.headersTimeoutMs, bodyTimeout: policy.bodyTimeoutMs }),
+    }) : new Agent(options);
+    const dispatcher = {
+      // Override at dispatch so native fetch cannot replace the selected budgets.
+      dispatch(options, handler) {
+        return agent.dispatch({ ...options, headersTimeout: policy.headersTimeoutMs, bodyTimeout: policy.bodyTimeoutMs }, handler);
+      },
+      close: () => agent.close(),
+      destroy: () => agent.destroy(),
+    };
+    codexDispatchers.set(key, dispatcher);
+  }
+  return codexDispatchers.get(key);
+}
+
+export async function closeCodexDispatchers() {
+  const dispatchers = [...codexDispatchers.values()];
+  codexDispatchers.clear();
+  await Promise.all(dispatchers.map((dispatcher) => dispatcher.close()));
+}
 
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
@@ -291,7 +329,7 @@ async function createBypassRequest(parsedUrl, realIP, options) {
   });
 }
 
-export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
+export async function proxyAwareFetch(url, options = {}, proxyOptions = null, transportPolicy = null) {
   const targetUrl = typeof url === "string" ? url : url.toString();
 
   // Vercel relay: forward request via relay headers
@@ -303,12 +341,19 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       "x-relay-target": `${parsed.protocol}//${parsed.host}`,
       "x-relay-path": `${parsed.pathname}${parsed.search}`,
     };
-    return originalFetch(vercelRelayUrl, { ...options, headers: relayHeaders });
+    const relayProxy = transportPolicy ? (resolveConnectionProxyUrl(vercelRelayUrl, proxyOptions) || normalizeProxyUrl(getEnvProxyUrl(vercelRelayUrl))) : null;
+    const dispatcher = transportPolicy ? getCodexDispatcher(relayProxy, transportPolicy) : options.dispatcher;
+    return originalFetch(vercelRelayUrl, { ...options, headers: relayHeaders, ...(dispatcher && { dispatcher }) });
   }
 
   const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
   const envProxyUrl = connectionProxyUrl ? null : normalizeProxyUrl(getEnvProxyUrl(targetUrl));
   const proxyUrl = connectionProxyUrl || envProxyUrl;
+
+  // Codex never falls back around a configured proxy or replays a failed POST.
+  if (transportPolicy) {
+    return originalFetch(url, { ...options, dispatcher: getCodexDispatcher(proxyUrl, transportPolicy) });
+  }
 
   // MITM DNS bypass: for known MITM-intercepted hosts, resolve real IP to avoid DNS spoof
   if (shouldBypassMitmDns(targetUrl)) {

@@ -21,3 +21,9 @@ export const SSE_HEADERS_CORS = {
   "Connection": "keep-alive",
   "Access-Control-Allow-Origin": "*"
 };
+
+export const SSE_HEADERS_CODEX_RESPONSES = {
+  ...SSE_HEADERS_CORS,
+  "Cache-Control": "no-cache, no-transform",
+  "X-Accel-Buffering": "no",
+};

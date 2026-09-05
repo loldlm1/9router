@@ -14,7 +14,7 @@ import {
   getModelReasoningModes,
   getModelUpstreamId,
 } from "../config/providerModels.js";
-import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry, CODEX_SSE_PEEK_TIMEOUT_MS, CODEX_SSE_PEEK_BYTES } from "../config/runtimeConfig.js";
+import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry, CODEX_SSE_PEEK_TIMEOUT_MS, CODEX_SSE_PEEK_BYTES, CODEX_TRANSPORT_TIMEOUTS } from "../config/runtimeConfig.js";
 import { FALLBACK_SCOPE_ACCOUNT, FALLBACK_SCOPE_REQUEST } from "../services/fallbackScope.js";
 import { dbg } from "../utils/debugLog.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
@@ -401,7 +401,7 @@ export class CodexExecutor extends BaseExecutor {
     let attempt = 0;
     while (true) {
       args.signal?.throwIfAborted();
-      const result = await super.execute({ ...args, retryBudget });
+      const result = await super.execute({ ...args, retryBudget, transportPolicy: this._isCompact ? null : CODEX_TRANSPORT_TIMEOUTS });
       args.diagnostics?.phase("preflight");
       let peek;
       try { peek = await this._peekSseTransientError(result.response, { signal: args.signal }); }

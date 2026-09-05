@@ -69,6 +69,18 @@ export const CODEX_SSE_PEEK_BYTES = envInteger("CODEX_SSE_PEEK_BYTES", 256 * 102
 // Fetch connect timeout: abort if upstream doesn't return response headers within this duration
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);
 
+export const CODEX_STREAM_STALL_TIMEOUT_MS = envInteger("CODEX_STREAM_STALL_TIMEOUT_MS", Math.min(STREAM_STALL_TIMEOUT_MS, 86400000), 1, 86400000);
+export const CODEX_STREAM_HEARTBEAT_MS = envInteger("CODEX_STREAM_HEARTBEAT_MS", 15000, 0, 60000);
+export const CODEX_STREAM_CLEANUP_MARGIN_MS = 30000;
+export const CODEX_TRANSPORT_TIMEOUTS = Object.freeze({
+  connectTimeoutMs: envInteger("CODEX_FETCH_CONNECT_TIMEOUT_MS", 10000, 1, 120000),
+  headersTimeoutMs: envInteger("FETCH_CONNECT_TIMEOUT_MS", 60000, 1, 86400000),
+  bodyTimeoutMs: Math.max(
+    envInteger("CODEX_FETCH_BODY_TIMEOUT_MS", CODEX_STREAM_STALL_TIMEOUT_MS + CODEX_STREAM_CLEANUP_MARGIN_MS, 1, 86400000 + CODEX_STREAM_CLEANUP_MARGIN_MS),
+    CODEX_STREAM_STALL_TIMEOUT_MS + CODEX_STREAM_CLEANUP_MARGIN_MS,
+  ),
+});
+
 // Gemini native TTS fetch timeout: abort if Google does not return response headers in time.
 export const GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS = envMs("GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS", 45 * 1000);
 

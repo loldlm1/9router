@@ -1,7 +1,7 @@
 # Plan: Codex Long-Task Stream Reliability
 
 **Generated**: 2026-09-05
-**Status**: S1 `8dc5f120`, S2 `4f1419b1` committed; Sprint 3 validated (71 tests), commit gate next
+**Status**: S1 `8dc5f120`, S2 `4f1419b1`, S3 `30d00735` committed; Sprint 4 validated (84 tests), commit gate next
 **Estimated complexity**: High
 **Sprints**: 5, executed in order
 **Source review baseline**: `9f57d45c` (`docs: finalize Astra VPS handoff`)
@@ -642,8 +642,8 @@ active requests before a deployed code rollback.
 
 - [x] Startup, cancellation, attempt-budget, and capacity tests pass (71 tests, 10 suites).
 - [x] No abandoned request, reader, lease, listener, or retry timer remains in controlled checks.
-- [ ] Exactly one Sprint 3 commit created; evidence and rollback point recorded.
-- [ ] Sprint 4 has not started before this gate passes.
+- [x] Exactly one Sprint 3 commit created; evidence and rollback point recorded.
+- [x] Sprint 4 has not started before this gate passes.
 
 ## Sprint 4: Align Timeout And Downstream Liveness Policies
 
@@ -748,9 +748,9 @@ deployed settings and drain any pools before process replacement.
 
 ### Sprint 4 Gate
 
-- [ ] Timeout behavior is verified through real fetch, not only mocks.
-- [ ] Heartbeat, backpressure, framing, and cleanup tests pass.
-- [ ] Configuration documentation and residual risks match the implementation.
+- [x] Timeout behavior is verified through real fetch, not only mocks.
+- [x] Heartbeat, backpressure, framing, and cleanup tests pass.
+- [x] Configuration documentation and residual risks match the implementation.
 - [ ] Exactly one Sprint 4 commit created; rollback point recorded.
 - [ ] Sprint 5 has not started before this gate passes.
 
