@@ -3,14 +3,28 @@ import {
   getModelReasoningEfforts,
   getModelReasoningMode,
   getModelReasoningModes,
+  getModelQuotaFamily,
   getModelUpstreamId,
   getProviderModels,
 } from "../../open-sse/config/providerModels.js";
 
 const GPT_56_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 const GPT_56_LUNA_EFFORTS = GPT_56_EFFORTS.filter((effort) => effort !== "ultra");
+const ASTRA_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 describe("Codex model reasoning metadata", () => {
+  it.each([
+    ["gpt-6-astra", null, "normal"],
+    ["gpt-6-astra-pro", "pro", "normal"],
+    ["gpt-6-astra-review", null, "review"],
+  ])("exposes Astra routing metadata for %s", (model, presetMode, quotaFamily) => {
+    expect(getModelReasoningEfforts("cx", model)).toEqual(ASTRA_EFFORTS);
+    expect(getModelReasoningModes("cx", model)).toEqual(["standard", "pro"]);
+    expect(getModelReasoningMode("cx", model)).toBe(presetMode);
+    expect(getModelUpstreamId("cx", `${model}(max)`)).toBe("gpt-6-astra(max)");
+    expect(getModelQuotaFamily("cx", model)).toBe(quotaFamily);
+  });
+
   it.each(["sol", "terra", "luna"])("exposes GPT-5.6 %s capabilities", (variant) => {
     const model = `gpt-5.6-${variant}`;
     expect(getModelReasoningEfforts("cx", model)).toEqual(variant === "luna" ? GPT_56_LUNA_EFFORTS : GPT_56_EFFORTS);

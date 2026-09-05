@@ -62,4 +62,20 @@ describe("getCapabilitiesForModel", () => {
     expect(getCapabilitiesForModel("kiro", "gpt-5.6-luna-agentic")).toMatchObject(kiroGpt56Expected);
     expect(getCapabilitiesForModel("kiro", "gpt-5.6-sol-thinking-agentic")).toMatchObject(kiroGpt56Expected);
   });
+
+  it.each([
+    "gpt-6-astra",
+    "gpt-6-astra-pro",
+    "gpt-6-astra-review",
+  ])("reports Codex Astra capabilities for %s", (model) => {
+    expect(getCapabilitiesForModel("codex", model)).toMatchObject({
+      contextWindow: 1_050_000,
+      maxOutput: 128_000,
+      thinkingFormat: "openai",
+      thinkingCanDisable: false,
+      reasoning: true,
+      vision: true,
+      search: true,
+    });
+  });
 });

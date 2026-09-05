@@ -18,6 +18,7 @@ import {
   KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from "open-sse/config/codexConstants.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -27,7 +28,7 @@ const OAUTH_TEST_CONFIG = {
     method: "POST",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
-    extraHeaders: { "Content-Type": "application/json", "originator": "codex_cli_rs", "User-Agent": "codex_cli_rs/0.136.0" },
+    extraHeaders: { "Content-Type": "application/json", "originator": CODEX_ORIGINATOR, "User-Agent": CODEX_USER_AGENT },
     // Minimal invalid body — triggers fast 400 without consuming quota
     body: JSON.stringify({ model: "gpt-5.3-codex", input: [], stream: false, store: false }),
     // 400 (bad request) means auth succeeded; only 401/403 means token is bad

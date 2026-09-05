@@ -17,6 +17,14 @@ const chatModel = {
   context_length: 1_000_000,
 };
 
+const astraModels = ["gpt-6-astra", "gpt-6-astra-pro", "gpt-6-astra-review"].map((id) => ({
+  id: `cx/${id}`,
+  object: "model",
+  owned_by: "cx",
+  context_length: 1_050_000,
+  max_completion_tokens: 128_000,
+}));
+
 function params(model) {
   return { params: Promise.resolve({ model }) };
 }
@@ -43,6 +51,19 @@ describe("GET /v1/models/{id}", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(chatModel);
+  });
+
+  it.each(astraModels)("resolves the configured Astra route $id", async (astraModel) => {
+    mocks.buildModelsList.mockResolvedValue(astraModels);
+    const [, modelId] = astraModel.id.split("/");
+
+    const response = await GET(
+      new Request(`https://router.test/v1/models/cx/${modelId}`),
+      params(["cx", modelId]),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(astraModel);
   });
 
   it("keeps capability-list routes unchanged", async () => {

@@ -11,14 +11,15 @@ import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
+import {
+  CODEX_CLIENT_VERSION,
+  CODEX_ORIGINATOR,
+  CODEX_USER_AGENT,
+} from "open-sse/config/codexConstants.js";
+import { mergeCodexCatalogModels } from "open-sse/providers/models/helpers.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
-// The /codex/models endpoint gates each entry by minimal_client_version against this
-// value, and codex CLI's own manifest (openai/codex codex-rs/models-manager/models.json)
-// already requires 0.144.0 for its newest models, so a stale client_version here comes
-// back 200 with those entries quietly missing instead of erroring.
-const CODEX_CLIENT_VERSION = "0.144.6";
 const CODEX_MODELS_URL = `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`;
 
 const parseOpenAIStyleModels = (data) => {
@@ -49,27 +50,6 @@ const parseGeminiCliModels = (data) => {
   return [];
 };
 
-const appendCodexReviewModels = (models) => models.flatMap((model) => {
-  const id = model?.id || model?.slug || model?.model || model?.name;
-  if (!id) return [];
-  const name = model?.display_name || model?.displayName || model?.name || id;
-  const normalized = { ...model, id, name };
-  const isChatModel = (model?.type || "llm") !== "image" && !id.toLowerCase().includes("embed");
-  if (!isChatModel || id.endsWith("-review")) return [normalized];
-  return [
-    normalized,
-    {
-      ...normalized,
-      id: `${id}-review`,
-      name: `${name} Review`,
-      upstreamModelId: id,
-      quotaFamily: "review",
-    },
-  ];
-});
-
-const parseCodexModels = (data) => appendCodexReviewModels(parseOpenAIStyleModels(data));
-
 const createOpenAIModelsConfig = (url) => ({
   url,
   method: "GET",
@@ -86,9 +66,14 @@ const getStaticProviderModels = (providerId) =>
     name: model.name || model.id,
   }));
 
+const parseCodexModels = (data) => mergeCodexCatalogModels(
+  parseOpenAIStyleModels(data),
+  getStaticProviderModels("codex"),
+);
+
 // Generic custom resolver for OAuth providers that need refresh-on-401 + token persist.
 // Receives a `fetchFn(token)` and returns parsed models or throws.
-const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => async (connection) => {
+const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel, fallbackFn }) => async (connection) => {
   const { accessToken, refreshToken } = connection;
   if (!accessToken) {
     return { error: "No valid token found", status: 401 };
@@ -113,6 +98,7 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
       const data = await response.json();
       const models = parseFn(data);
       if (models.length > 0) return { models };
+      return { models: [] };
     } else {
       const errorText = await response.text();
       warning = `${errorLabel}: ${response.status} ${errorText}`;
@@ -122,7 +108,10 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
     warning = `${errorLabel}: ${error.message}`;
     console.log(`${errorLabel} (falling back to static):`, error.message);
   }
-  return { models: [], warning };
+  return {
+    models: warning && fallbackFn ? fallbackFn() : [],
+    warning,
+  };
 };
 
 // Provider models endpoints configuration
@@ -153,11 +142,13 @@ const PROVIDER_MODELS_CONFIG = {
           "Content-Type": "application/json",
           "Accept": "application/json",
           "Authorization": `Bearer ${token}`,
-          "originator": "codex_cli_rs"
+          "originator": CODEX_ORIGINATOR,
+          "User-Agent": CODEX_USER_AGENT,
         }
       }),
       parseFn: parseCodexModels,
-      errorLabel: "Failed to fetch Codex models"
+      errorLabel: "Failed to fetch Codex models",
+      fallbackFn: () => getStaticProviderModels("codex"),
     })
   },
   antigravity: {

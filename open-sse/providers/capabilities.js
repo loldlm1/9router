@@ -139,6 +139,7 @@ const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true,
 // (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. #2720
 const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 372000, maxOutput: 128000 };
 const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+const CODEX_GPT_6_ASTRA_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1050000, maxOutput: 128000 };
 
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
@@ -154,6 +155,9 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-ai/deepseek-v4-flash": { reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 65536 },
   },
   "codex": {
+    "gpt-6-astra":                 CODEX_GPT_6_ASTRA_CAPS,
+    "gpt-6-astra-pro":             CODEX_GPT_6_ASTRA_CAPS,
+    "gpt-6-astra-review":          CODEX_GPT_6_ASTRA_CAPS,
     "gpt-5.6-sol":               CODEX_GPT_56_SOL_CAPS,
     "gpt-5.6-sol-review":        CODEX_GPT_56_SOL_CAPS,
     "gpt-5.6-terra":             CODEX_GPT_56_DEFAULT_CAPS,
@@ -247,7 +251,8 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*gemma*",         caps: { vision: true, contextWindow: 128000 } },
   { pattern: "*nanobanana*",    caps: { vision: true, imageOutput: true } },
 
-  // ── OpenAI GPT-5.x (vision + thinking + web search) ──────────────
+  // ── OpenAI GPT-6 Astra / GPT-5.x ──────────────────────────────────
+  { pattern: "*gpt-6-astra*",  caps: CODEX_GPT_6_ASTRA_CAPS },
   { pattern: "*gpt-5*image*",   caps: { imageOutput: true } },
   { pattern: "*gpt-5*codex*",   caps: { reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
   { pattern: "*gpt-5*",         caps: { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 400000, maxOutput: 128000 } },
