@@ -8,10 +8,12 @@ import {
   modelReasoningMode,
   modelReasoningModes,
   modelStrip,
+  modelSupportedFormats,
   modelTargetFormat,
   normalizeModelId,
 } from "../providers/models/schema.js";
-import { CODEX_REVIEW_SUFFIX } from "../providers/models/helpers.js";
+import { CODEX_REVIEW_SUFFIX, isMuseSparkModel } from "../providers/models/helpers.js";
+import { FORMATS } from "../translator/formats.js";
 export { PROVIDER_MODELS };
 
 
@@ -57,9 +59,20 @@ export function findModelName(aliasOrId, modelId) {
 }
 
 export function getModelTargetFormat(aliasOrId, modelId) {
+  if ((!aliasOrId || aliasOrId === "oc" || aliasOrId === "opencode") && isMuseSparkModel(modelId)) {
+    return FORMATS.OPENAI_RESPONSES;
+  }
   const models = PROVIDER_MODELS[aliasOrId];
   if (!models) return null;
   return modelTargetFormat(findModel(models, modelId, aliasOrId));
+}
+
+// Declared upstream formats for a model (registry `supportedFormats`). Drives the
+// per-model guard on the sourceFormat-matched transport; null when undeclared.
+export function getModelSupportedFormats(aliasOrId, modelId) {
+  const models = PROVIDER_MODELS[aliasOrId];
+  if (!models) return null;
+  return modelSupportedFormats(findModel(models, modelId, aliasOrId));
 }
 
 export function getModelType(aliasOrId, modelId) {

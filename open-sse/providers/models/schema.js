@@ -50,3 +50,11 @@ export function modelReasoningModes(model) {
 export function modelReasoningMode(model) {
   return typeof model?.reasoningMode === "string" ? model.reasoningMode : MODEL_DEFAULTS.reasoningMode;
 }
+
+// Per-model declared upstream formats (e.g. ["openai", "claude"]). Guards the
+// sourceFormat-matched transport for multi-endpoint providers whose models differ
+// in endpoint support (opencode-go: kimi/glm only do /chat/completions, minimax/qwen
+// also do /messages, deepseek also does /responses).
+export function modelSupportedFormats(model) {
+  return model?.supportedFormats || null;
+}
