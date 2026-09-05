@@ -119,9 +119,11 @@ PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 Production mode:
 
 ```bash
-npm run build
-PORT=20128 HOSTNAME=0.0.0.0 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run start
+npm run vps -- --port 20128
 ```
+
+The VPS runner refreshes dependencies and rebuilds only when needed, then starts
+`custom-server.js` on `0.0.0.0`. Add `--rebuild` to force a fresh build.
 
 Default URLs:
 
@@ -1221,29 +1223,30 @@ Model: cc/claude-opus-4-7
 git clone https://github.com/decolua/9router.git
 cd 9router
 npm install
-npm run build
 
 # Configure
 export JWT_SECRET="your-secure-secret-change-this"
 export INITIAL_PASSWORD="your-password"
 export DATA_DIR="/var/lib/9router"
-export PORT="20128"
-export HOSTNAME="0.0.0.0"
 export NODE_ENV="production"
 export NEXT_PUBLIC_BASE_URL="http://localhost:20128"
 export NEXT_PUBLIC_CLOUD_URL="https://9router.com"
 export API_KEY_SECRET="endpoint-proxy-api-key-secret"
 export MACHINE_ID_SALT="endpoint-proxy-salt"
 
-# Start
-npm run start
+# Build when needed and start on the requested port
+npm run vps -- --port 20128
 
 # Or use PM2
 npm install -g pm2
-pm2 start npm --name 9router -- start
+pm2 start npm --name 9router -- run vps -- --port 20128
 pm2 save
 pm2 startup
 ```
+
+Keep `DATA_DIR` unchanged across updates. Accounts and settings remain in
+`$DATA_DIR/db/data.sqlite` (or `~/.9router/db/data.sqlite` when `DATA_DIR` is
+unset); dependency installs and production builds do not replace that directory.
 
 ### Docker
 
