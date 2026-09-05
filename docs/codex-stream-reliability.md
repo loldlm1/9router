@@ -1,5 +1,9 @@
 # Codex stream reliability
 
+The implementation and manual rollout are complete. The user confirmed that
+the VPS operates without warnings after deploying startup fix `42575032`.
+The records below distinguish that acceptance from independently measured checks.
+
 `CODEX_ROUTE status=200` records HTTP acceptance. `CODEX_STREAM` records a
 request UUID, upstream attempt ordinal, phase, elapsed timing, counters, and an
 allowlisted error classification. HTTP acceptance is not Responses completion.
@@ -70,8 +74,8 @@ an attempt ordinal. This is instrumentation only; startup, terminal, and timeout
 corrections are implemented in the subsequent ordered sprints.
 
 The implementation plan is `codex-long-task-stream-reliability-plan.md`.
-Independent timed/client verification on the VPS was not recorded. No incident logs from the
-local workstation are used as evidence for the VPS-only report.
+Independent timed/client verification on the VPS was not recorded. No incident
+logs from the local workstation are used as evidence for the VPS-only report.
 
 ## Startup and retry ownership
 
@@ -245,7 +249,8 @@ on silently excluding or fixing unrelated defects.
 
 The baseline was extracted with `git archive 9f57d45c` into
 `/tmp/9router-stream-baseline-89njrr6w` with its own synthetic data. Private test
-artifacts, which are temporary and are not shipped to the VPS:
+artifact locations are historical; temporary data and builds were retired during
+thread cleanup and are not shipped to the VPS:
 
 - Candidate broad log: `/home/loldlm/.local/share/rtk/tee/1788623467_test.log`.
 - Baseline broad log: `/home/loldlm/.local/share/rtk/tee/1788623882_test.log`.
@@ -271,12 +276,12 @@ Candidate identifiers:
 - Local build: `.next-cli-build/stream-reliability`, build ID `t5Eej8I19aHTA32HBrE6Q`.
 - Standalone output: `.next-cli-build/stream-reliability/standalone/`.
 
-The local build is validation output, not a published release artifact. The VPS
-will build its own artifact after pulling; record that artifact's identity and
-repeat runtime/stream checks there. A matching source SHA does not prove the
-same runtime, native bindings, ingress behavior, or Codex recovery.
+The local build was validation output and has been retired. The user built and
+deployed separately on the VPS; its artifact identity was not independently
+recorded. A matching source SHA does not prove the same runtime, native bindings,
+ingress behavior, or Codex recovery.
 
-## Manual VPS handoff
+## Manual release and rollback reference
 
 The user performs VPS pulls and startup manually. This implementation batch did not
 connect to, deploy to, start, restart, or change the VPS. Keep the exact current
@@ -330,7 +335,11 @@ records, and the 30-minute observation were not independently captured. This
 record does not claim those measurements passed or identify the original
 socket-close cause.
 
-The remaining `MODULE_TYPELESS_PACKAGE_JSON` warning came from the CommonJS
+After deploying follow-up commit `42575032`, the user confirmed that the VPS
+works without warnings. The final manual rollout is complete; no further
+deployment or implementation step is pending for this plan.
+
+The `MODULE_TYPELESS_PACKAGE_JSON` warning came from the CommonJS
 custom server dynamically importing `src/sse/services/backgroundTokenRefresh.js`
 as raw source. That path also bypassed Next's `@/` and `open-sse/` module aliases.
 The follow-up starts token refresh from the existing Node-only
@@ -382,16 +391,17 @@ DATA_DIR=/tmp/9router-startup-qa-fqewwvct/build-data RUN_REAL=0 \
 # PASS: production build and postbuild.
 ```
 
-The standalone check script and its result are temporary validation artifacts at
+The standalone check script and its result were temporary validation artifacts at
 `/tmp/9router-startup-qa-fqewwvct/smoke.py` and
-`/tmp/9router-startup-qa-fqewwvct/standalone-smoke.json`; output is in
-`/tmp/9router-startup-qa-fqewwvct/standalone-smoke.log`. The existing broad-suite
-baseline failures recorded for Sprint 5 were not rerun for this startup-only fix.
+`/tmp/9router-startup-qa-fqewwvct/standalone-smoke.json`; output was in
+`/tmp/9router-startup-qa-fqewwvct/standalone-smoke.log`. These temporary artifacts
+were retired during thread cleanup; the results above remain the execution record.
+The existing broad-suite baseline failures recorded for Sprint 5 were not rerun
+for this startup-only fix.
 
-The warning fix is a separate follow-up commit after Sprint 5, with rollback
-parent `9e13f9e8`. It does not amend or add to the five original sprint commits.
-To apply it on the VPS, the user pulls and rebuilds/starts using the manual
-handoff procedure. No VPS process or configuration was changed by this work.
+The warning fix is separate follow-up commit `42575032` after Sprint 5, with
+rollback parent `9e13f9e8`. It does not amend any of the five sprint commits.
+The user applied it using the manual release procedure.
 Revert the follow-up as a unit and rebuild the previous revision if needed;
 that restores the old loader without reverting the stream-reliability fixes.
 
@@ -400,3 +410,23 @@ Official behavior rechecked on 2026-09-05:
 runs registration once per new server instance before handling requests;
 [Node.js package scopes](https://nodejs.org/docs/latest-v24.x/api/packages.html)
 explain why changing the root module type would also affect CommonJS `.js` files.
+
+## Thread closeout
+
+On 2026-09-05, the completed disposable active-plan state and this thread's old
+compaction snapshot were removed from `.codex-hook-state/`. The retained plan
+and this runbook are the durable record; a new task should initialize fresh
+execution state only when its own plan is authorized.
+
+Task-specific builds `.next-cli-build/stream-reliability/` and
+`.next-cli-build/module-warning/`, plus the remaining synthetic data/smoke
+directory `/tmp/9router-startup-qa-fqewwvct/`, were removed. The older stream QA
+and baseline directories under `/tmp` were already absent. Historical commands,
+versions, build IDs, results, and rollback commits are retained here. Recreate
+isolated test data/build directories before rerunning those commands.
+
+Installed hook code and unrelated build/data directories remain in place. The
+small `0.6.0` compatibility link to the installed `0.6.1` plugin remains so a
+still-open client using the old hook path does not fail. It contains no plan
+state and does not reactivate this completed task. Both hook paths were checked
+with no active plan; neither requests continuation or recreates stale state.

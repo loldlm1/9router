@@ -1,7 +1,7 @@
 # Plan: Codex Long-Task Stream Reliability
 
 **Generated**: 2026-09-05
-**Status**: Complete by user acceptance after manual VPS deployment; startup-warning follow-up recorded below
+**Status**: Complete; user confirms the final VPS deployment works without warnings
 **Estimated complexity**: High
 **Sprints**: 5, executed in order
 **Source review baseline**: `9f57d45c` (`docs: finalize Astra VPS handoff`)
@@ -28,6 +28,8 @@ The user subsequently reported deploying the changes on the VPS successfully,
 confirmed that operation was satisfactory, and requested plan closure plus a fix
 for the startup module warning. Completion records that user acceptance; it does
 not claim the unrecorded timed/client measurements were performed.
+After deploying follow-up commit `42575032`, the user confirmed satisfactory
+operation with no warnings. No implementation or deployment action remains open.
 
 ## Review Findings
 
@@ -950,21 +952,22 @@ operator-owned worksheet; put only sanitized procedure/results in the repository
 - [x] User confirms satisfactory operation and explicitly requests plan closure.
 - [x] The startup-warning follow-up is handled separately from the five sprint
   commits; validation and rollback are recorded in `docs/codex-stream-reliability.md`.
+- [x] User confirms the final warning fix is deployed and the VPS runs without warnings.
 
 The exact deployed SHA, Node/Undici and Codex builds/settings, ingress topology,
 12-minute stream timings, controlled reconnect/cancellation records, and the
 30-minute observation were not independently captured. Those measurements remain
 available as optional operational follow-up using Tasks 5.2 and 5.3; they are not
-marked passing. The original socket-close cause remains unconfirmed. The warning
-fix requires another manual pull/rebuild/start to reach the VPS.
+marked passing. The original socket-close cause remains unconfirmed. User
+confirmation closes the manual rollout of warning-fix commit `42575032`.
 
-Local output is `.next-cli-build/stream-reliability/standalone/`, build ID
+Historical local output was `.next-cli-build/stream-reliability/standalone/`, build ID
 `t5Eej8I19aHTA32HBrE6Q`, on Node `24.6.0` / bundled Undici `7.13.0`, npm Undici
-`7.29.0`, and Next.js `16.2.12`. No artifact has been deployed. A VPS rebuild
-must be fingerprinted and validated on that runtime; local success cannot
-establish deployed streaming behavior. The temporary built-app process stopped
-after its smoke check. No VPS startup, restart, deployment, or configuration
-change is part of this local execution batch.
+`7.29.0`, and Next.js `16.2.12`. The local artifact was used only for validation
+and was retired during thread cleanup. The user built and deployed on the VPS;
+the exact deployed artifact identity was not independently captured. The temporary
+built-app process stopped after its smoke check. No VPS startup, restart,
+deployment, or configuration change is part of this local execution batch.
 
 ## Testing Strategy And Acceptance Matrix
 
@@ -1073,6 +1076,8 @@ sequential. This is a dependency map, not authorization to spawn sub-agents.
 
 ## Completion Checklist
 
+- [x] Final warning-free VPS operation confirmed by the user; documentation
+  updated and completed workspace hook state/temporary validation artifacts retired.
 - [x] Startup-warning follow-up validated: 31 distinct scoped tests passed after
   the documented import-timeout rerun, plus the HTTP server regression, lint,
   production build, and standalone scheduler/health/shutdown smoke check.
