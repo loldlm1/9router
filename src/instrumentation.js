@@ -10,5 +10,16 @@ export async function register() {
 
     const { startModelCatalogSync } = await import("@/lib/modelCatalog/sync.js");
     startModelCatalogSync();
+
+    // Load through Next's module graph so aliases resolve in standalone builds.
+    try {
+      const { startBackgroundTokenRefresh, stopBackgroundTokenRefresh } = await import("@/sse/services/backgroundTokenRefresh.js");
+      if (startBackgroundTokenRefresh()) {
+        process.once("SIGINT", stopBackgroundTokenRefresh);
+        process.once("SIGTERM", stopBackgroundTokenRefresh);
+      }
+    } catch (error) {
+      console.error("[BackgroundTokenRefresh] scheduler start failed:", error?.message ?? String(error));
+    }
   }
 }

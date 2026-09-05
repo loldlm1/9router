@@ -1,7 +1,7 @@
 # Plan: Codex Long-Task Stream Reliability
 
 **Generated**: 2026-09-05
-**Status**: Local sprint batch complete; manual VPS rollout and actual Codex acceptance pending
+**Status**: Complete by user acceptance after manual VPS deployment; startup-warning follow-up recorded below
 **Estimated complexity**: High
 **Sprints**: 5, executed in order
 **Source review baseline**: `9f57d45c` (`docs: finalize Astra VPS handoff`)
@@ -24,8 +24,10 @@ The initial planning turn inspected source, test definitions, and official
 documentation and created only this plan. The subsequently authorized sprint
 batch used synthetic tests and isolated data. It did not search local incident
 logs, inspect personal Codex sessions or real provider data, or connect to the VPS.
-The user will pull, rebuild, and start 9router on the VPS manually; operational
-acceptance remains separate from the completed local implementation batch.
+The user subsequently reported deploying the changes on the VPS successfully,
+confirmed that operation was satisfactory, and requested plan closure plus a fix
+for the startup module warning. Completion records that user acceptance; it does
+not claim the unrecorded timed/client measurements were performed.
 
 ## Review Findings
 
@@ -814,7 +816,8 @@ this sprint and rerun the affected earlier checks before its single commit.
 
 ### Task 5.2: Fingerprint the VPS path and run an isolated canary
 
-- **Status**: Pending user-operated VPS startup; no VPS operation was performed.
+- **Status**: User reports successful manual VPS deployment. Detailed runtime
+  fingerprints and timed origin/public measurements were not supplied.
 - **Location**: VPS canary release, its ingress/outbound route, and runbook worksheet.
 - **Work**: Record the prerequisite metadata on the affected deployment and
   client; compare deployed source with the review baseline. Use the existing
@@ -855,7 +858,8 @@ this sprint and rerun the affected earlier checks before its single commit.
 
 ### Task 5.3: Verify Codex task continuity and prepare promotion
 
-- **Status**: Pending deployed runtime/route checks and the affected Codex client.
+- **Status**: Closed by user acceptance of deployed operation. Independent Codex
+  parser, controlled reconnect, and 30-minute observation records were not supplied.
 - **Location**: Affected Codex version, dedicated canary provider entry, disposable
   task workspace, VPS canary, and runbook.
 - **Work**: Record `codex --version` on the affected client. Use a dedicated
@@ -938,15 +942,21 @@ operator-owned worksheet; put only sanitized procedure/results in the repository
   rollback parent `72a23200`; it changes only tests/docs. Its SHA is discoverable
   from the integration file's creation commit, without amending its own record.
 
-### Pending Operational Acceptance
+### Operator Acceptance And Measurement Limits
 
-- [ ] User pulls, rebuilds, and starts the candidate using the existing VPS method.
-- [ ] Deployed source/build/runtime, affected Codex build/settings, and actual
-  ingress/outbound path are recorded; exact service rollback commands are known.
-- [ ] Origin/public streaming and actual Codex parser/continuity checks in Tasks
-  5.2 and 5.3 pass, including cancellation/reuse and the 30-minute observation.
-- [ ] VPS incident resolution is assessed from the live results, with any
-  remaining upstream/client limitations recorded.
+- [x] User reports redeploying and starting the latest sprint changes on the VPS.
+- [x] Supplied startup output shows Next.js `16.2.12` ready on port `20128` and
+  the model catalog loaded. It also shows the nonfatal module-type warning.
+- [x] User confirms satisfactory operation and explicitly requests plan closure.
+- [x] The startup-warning follow-up is handled separately from the five sprint
+  commits; validation and rollback are recorded in `docs/codex-stream-reliability.md`.
+
+The exact deployed SHA, Node/Undici and Codex builds/settings, ingress topology,
+12-minute stream timings, controlled reconnect/cancellation records, and the
+30-minute observation were not independently captured. Those measurements remain
+available as optional operational follow-up using Tasks 5.2 and 5.3; they are not
+marked passing. The original socket-close cause remains unconfirmed. The warning
+fix requires another manual pull/rebuild/start to reach the VPS.
 
 Local output is `.next-cli-build/stream-reliability/standalone/`, build ID
 `t5Eej8I19aHTA32HBrE6Q`, on Node `24.6.0` / bundled Undici `7.13.0`, npm Undici
@@ -1042,8 +1052,9 @@ follows manual startup. Preserve the current working artifact before switching.
 Execution used the planner's active-plan state and updated validation, commit,
 and sprint transitions in order. On continuation, inspect that state before
 making changes; do not initialize a second execution or repeat completed sprints.
-Mark local implementation complete after the Sprint 5 commit while retaining
-the separate operational checklist above for the user-owned VPS handoff.
+The local batch is complete after Sprint 5. The user has since accepted the VPS
+deployment and requested closure. Retain the measurement limits above; the
+startup-warning follow-up gets its own commit without amending any sprint.
 
 For **every** sprint: complete its tasks, run and record its validation, document
 residual risks, create **exactly one sprint-specific commit**, and record the
@@ -1062,6 +1073,11 @@ sequential. This is a dependency map, not authorization to spawn sub-agents.
 
 ## Completion Checklist
 
+- [x] Startup-warning follow-up validated: 31 distinct scoped tests passed after
+  the documented import-timeout rerun, plus the HTTP server regression, lint,
+  production build, and standalone scheduler/health/shutdown smoke check.
+  The target module warning is absent with `--trace-warnings`; rollback base
+  for this separate follow-up is `9e13f9e8`.
 - [x] Five local sprint gates completed, with one commit and rollback point each;
   unchanged unrelated baseline failures are documented, not marked passing.
 - [x] Source-confirmed defects corrected without fabricating Responses success.
@@ -1069,7 +1085,7 @@ sequential. This is a dependency map, not authorization to spawn sub-agents.
 - [x] Actual local dispatcher behavior and candidate versions recorded accurately.
 - [x] Required local build, scoped tests, diagnostics/privacy, and concurrency
   checks passed; broad regression failure comparison and smoke limits recorded.
-- [x] Manual VPS rollout and live acceptance explicitly reported as pending.
-- [ ] Deployed runtime, actual Codex parser/continuity, and VPS ingress verified.
+- [x] Manual VPS deployment and satisfactory operation confirmed by the user.
+- [x] Unmeasured runtime/client/ingress checks distinguished from user acceptance.
 - [x] Residual upstream/client limitations and tested sample sizes documented.
 - [x] No claim of VPS incident resolution based only on source review or offline tests.

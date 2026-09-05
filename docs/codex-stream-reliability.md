@@ -42,12 +42,12 @@ Sprint 1 commit: `8dc5f120`. Sprint 2 commit: `4f1419b1`; rollback parent
 `8dc5f120`.
 Sprint 3 commit: `30d00735`; rollback parent `4f1419b1`.
 Sprint 4 commit: `72a23200`; rollback parent `30d00735`. Sprint 5 base is
-`72a23200`. Sprint 5 is the commit introducing
-`tests/integration/codex-stream-transport.test.js`, with subject
-`test(codex): verify long-stream recovery and document VPS rollout`.
-Resolve its SHA with `git log --diff-filter=A --format=%H -- tests/integration/codex-stream-transport.test.js`.
+`72a23200`; Sprint 5 commit is `9e13f9e8`
+(`test(codex): verify long-stream recovery and document VPS rollout`).
 The local sprint batch and the subsequent VPS validation have separate gates:
-the user owns the VPS pull, rebuild, and startup; live checks remain pending.
+the user owns the VPS pull, rebuild, and startup. The user subsequently reported
+successful deployment and accepted closure; measurement limits are recorded in
+the closeout below.
 
 Responses passthrough now uses the same framed stream path for Codex, Droid,
 and other user agents. Only a complete, valid terminal settles successfully.
@@ -70,7 +70,7 @@ an attempt ordinal. This is instrumentation only; startup, terminal, and timeout
 corrections are implemented in the subsequent ordered sprints.
 
 The implementation plan is `codex-long-task-stream-reliability-plan.md`.
-Operational verification on the VPS remains pending. No incident logs from the
+Independent timed/client verification on the VPS was not recorded. No incident logs from the
 local workstation are used as evidence for the VPS-only report.
 
 ## Startup and retry ownership
@@ -278,7 +278,7 @@ same runtime, native bindings, ingress behavior, or Codex recovery.
 
 ## Manual VPS handoff
 
-The user will pull and start 9router manually. This implementation batch did not
+The user performs VPS pulls and startup manually. This implementation batch did not
 connect to, deploy to, start, restart, or change the VPS. Keep the exact current
 working release/build and its provider/environment/ingress settings available
 for rollback before replacing the serving process. No data migration is needed.
@@ -305,7 +305,8 @@ using the worksheet. Then complete plan Tasks 5.2 and 5.3: both Responses route
 aliases, a timed stream of at least 12 minutes through origin/public ingress,
 actual parser behavior with heartbeat comments, cancellation followed by another
 request, controlled reconnect/next-step recovery, and the 30-minute live-task
-observation. These checks are pending; health and local socket tests cannot
+observation. These measurements were not recorded before user acceptance;
+health and local socket tests cannot
 establish that the reported VPS interruption is resolved.
 
 For a stream-integrity, retry, or lease-cleanup regression, drain the candidate
@@ -317,3 +318,85 @@ sprint commits in reverse order; the complete pre-batch baseline is `9f57d45c`.
 Do not reset the checkout, delete data volumes, or replay tools/conversation
 history. Heartbeats can be disabled for new requests using
 `CODEX_STREAM_HEARTBEAT_MS=0`, but that alone does not roll back the batch.
+
+## Closure and startup-warning follow-up
+
+On 2026-09-05, the user reported redeploying the latest sprint changes on the VPS,
+supplied startup output showing Next.js `16.2.12` ready on port `20128`, confirmed
+satisfactory operation, and requested closure of the plan. The five-sprint batch
+is complete by that acceptance. Exact deployed SHA/runtime/client fingerprints,
+12-minute origin/public stream timings, controlled reconnect/cancellation
+records, and the 30-minute observation were not independently captured. This
+record does not claim those measurements passed or identify the original
+socket-close cause.
+
+The remaining `MODULE_TYPELESS_PACKAGE_JSON` warning came from the CommonJS
+custom server dynamically importing `src/sse/services/backgroundTokenRefresh.js`
+as raw source. That path also bypassed Next's `@/` and `open-sse/` module aliases.
+The follow-up starts token refresh from the existing Node-only
+`src/instrumentation.js` registration hook, which uses the bundled module graph.
+The custom-server import and deferred dashboard bootstrap duplicate are removed.
+The scheduler still starts before requests, honors its disable/build guards,
+keeps startup failures nonfatal, and cleans up on SIGINT/SIGTERM. The root package
+and CommonJS server format remain unchanged; warnings are not globally suppressed.
+
+Follow-up validation on Node `24.6.0`, bundled Undici `7.13.0`, and Next.js
+`16.2.12`, using isolated data at `/tmp/9router-startup-qa-fqewwvct`:
+
+- 21 tests passed across instrumentation startup, standalone assets, VPS runner,
+  and CLI build artifacts. The existing background-refresh suite passed all
+  10 tests on rerun with `--testTimeout 20000`. Its first runs exceeded the
+  default 5000 ms during the initial module import while the build was active;
+  no functional assertions or production timeouts were changed.
+- The HTTP/h2c server regression passed (1 test). ESLint passed for all four
+  changed JavaScript files, and `git diff --check` passed.
+- The production build and asset-copy step passed with
+  `NEXT_DIST_DIR=.next-cli-build/module-warning`; build ID
+  `xTq7fWkGndyOYuDbms33V`. The existing optional SQLite binding warnings remain.
+- The built standalone app ran with `--trace-warnings` and emitted no
+  `MODULE_TYPELESS_PACKAGE_JSON`. It started the scheduler exactly once,
+  executed its initial ten-second tick against an empty synthetic database,
+  returned health OK before/after the tick, and logged scheduler cleanup on
+  shutdown. Both Responses aliases returned the expected unauthenticated 401.
+  The fixture process stopped after the check. This does not exercise live
+  credentials or authenticated model streaming.
+
+Commands for the scoped suites and build:
+
+```bash
+DATA_DIR=/tmp/9router-startup-qa-fqewwvct/tests-data RUN_REAL=0 \
+  rtk test npm --prefix tests test -- --config vitest.config.js \
+  unit/instrumentation-background-token-refresh.test.js \
+  unit/background-token-refresh.test.js unit/standalone-assets.test.js \
+  unit/vps-runner.test.js unit/cli-build-artifacts.test.js
+# Initial run: 30 passed, 1 initial-import timeout.
+
+DATA_DIR=/tmp/9router-startup-qa-fqewwvct/tests-data RUN_REAL=0 \
+  rtk test npm --prefix tests test -- --config vitest.config.js \
+  --testTimeout 20000 unit/background-token-refresh.test.js
+# PASS: all 10 background-refresh tests.
+
+DATA_DIR=/tmp/9router-startup-qa-fqewwvct/build-data RUN_REAL=0 \
+  MODEL_CATALOG_SYNC=off NEXT_TELEMETRY_DISABLED=1 \
+  NEXT_DIST_DIR=.next-cli-build/module-warning rtk test npm run build
+# PASS: production build and postbuild.
+```
+
+The standalone check script and its result are temporary validation artifacts at
+`/tmp/9router-startup-qa-fqewwvct/smoke.py` and
+`/tmp/9router-startup-qa-fqewwvct/standalone-smoke.json`; output is in
+`/tmp/9router-startup-qa-fqewwvct/standalone-smoke.log`. The existing broad-suite
+baseline failures recorded for Sprint 5 were not rerun for this startup-only fix.
+
+The warning fix is a separate follow-up commit after Sprint 5, with rollback
+parent `9e13f9e8`. It does not amend or add to the five original sprint commits.
+To apply it on the VPS, the user pulls and rebuilds/starts using the manual
+handoff procedure. No VPS process or configuration was changed by this work.
+Revert the follow-up as a unit and rebuild the previous revision if needed;
+that restores the old loader without reverting the stream-reliability fixes.
+
+Official behavior rechecked on 2026-09-05:
+[Next.js instrumentation](https://nextjs.org/docs/app/api-reference/file-conventions/instrumentation)
+runs registration once per new server instance before handling requests;
+[Node.js package scopes](https://nodejs.org/docs/latest-v24.x/api/packages.html)
+explain why changing the root module type would also affect CommonJS `.js` files.
