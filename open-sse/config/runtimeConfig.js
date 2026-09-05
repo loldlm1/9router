@@ -39,6 +39,13 @@ function envMs(name, def) {
   return Number.isFinite(n) && n > 0 ? n : def;
 }
 
+function envInteger(name, def, min, max) {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === "") return def;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= min && n <= max ? n : def;
+}
+
 function envUrl(name, def) {
   const raw = process.env[name]?.trim();
   return raw || def;
@@ -56,6 +63,8 @@ export const STREAM_STALL_TIMEOUT_MS = envMs("STREAM_STALL_TIMEOUT_MS", 360 * 10
 export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_MS", 200 * 1000);
 
 export const RESPONSES_MAX_EVENT_BYTES = envMs("RESPONSES_MAX_EVENT_BYTES", 16 * 1024 * 1024);
+export const CODEX_SSE_PEEK_TIMEOUT_MS = envInteger("CODEX_SSE_PEEK_TIMEOUT_MS", 1000, 1, 10000);
+export const CODEX_SSE_PEEK_BYTES = envInteger("CODEX_SSE_PEEK_BYTES", 256 * 1024, 1024, 1024 * 1024);
 
 // Fetch connect timeout: abort if upstream doesn't return response headers within this duration
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);

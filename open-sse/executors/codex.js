@@ -1,6 +1,6 @@
 import { BaseExecutor } from "./base.js";
 import { CODEX_DEFAULT_INSTRUCTIONS } from "../config/codexInstructions.js";
-import { isCodexAstraModel } from "../config/codexConstants.js";
+import { isCodexAstraModel, CODEX_SSE_RETRY_PATTERNS, CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS } from "../config/codexConstants.js";
 import { PROVIDERS } from "../config/providers.js";
 import {
   refreshProviderCredentials,
@@ -14,21 +14,14 @@ import {
   getModelReasoningModes,
   getModelUpstreamId,
 } from "../config/providerModels.js";
-import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry } from "../config/runtimeConfig.js";
+import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry, CODEX_SSE_PEEK_TIMEOUT_MS, CODEX_SSE_PEEK_BYTES } from "../config/runtimeConfig.js";
 import { FALLBACK_SCOPE_ACCOUNT, FALLBACK_SCOPE_REQUEST } from "../services/fallbackScope.js";
 import { dbg } from "../utils/debugLog.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { createResponsesFrameDecoder } from "../utils/responsesStreamHelpers.js";
+import { setTimeout as delay } from "node:timers/promises";
 
 // SSE error patterns inside 200-OK bodies. Some retry same account first; capacity rotates accounts.
-const CODEX_SSE_RETRY_PATTERNS = ["server_is_overloaded", "service_unavailable_error"];
-const CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS = ["selected model is at capacity", "model_at_capacity"];
-const CODEX_SSE_USER_OUTPUT_PATTERNS = [
-  "event: response.output_text.delta",
-  "event: response.function_call_arguments.delta",
-  '"type":"response.output_text.delta"',
-  '"type":"response.function_call_arguments.delta"',
-];
-const CODEX_SSE_PEEK_BYTES = 256 * 1024;
 const CODEX_MODEL_CAPACITY_MESSAGE = "Selected model is at capacity. Please try a different model.";
 const CODEX_INVALID_REQUEST_STATUSES = new Set([400, 404, 422]);
 const CODEX_MODEL_REASONING_ERROR_PATTERNS = [
@@ -298,25 +291,6 @@ function parseCodexErrorBody(bodyText) {
   }
 }
 
-function extractSseErrorMessage(text, fallback) {
-  const exact = text?.match(/Selected model is at capacity\. Please try a different model\./i)?.[0];
-  if (exact) return exact;
-
-  for (const line of String(text || "").split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
-    try {
-      const message = findNestedMessage(JSON.parse(data));
-      if (message) return message;
-    } catch {
-      // Ignore non-JSON SSE data lines.
-    }
-  }
-
-  return fallback || CODEX_MODEL_CAPACITY_MESSAGE;
-}
-
 function codexSseErrorResponse(status, message) {
   return new Response(JSON.stringify({
     error: {
@@ -386,7 +360,7 @@ export class CodexExecutor extends BaseExecutor {
    * Runs before execute() because Codex backend cannot fetch remote images.
    * Mutates body.input in place.
    */
-  async prefetchImages(body) {
+  async prefetchImages(body, signal) {
     if (!Array.isArray(body?.input)) return;
     for (const item of body.input) {
       if (!Array.isArray(item.content)) continue;
@@ -396,7 +370,7 @@ export class CodexExecutor extends BaseExecutor {
         const detail = c.image_url?.detail || "auto";
         if (!url) return c;
         if (url.startsWith("data:")) return { type: "input_image", image_url: url, detail };
-        const fetched = await fetchImageAsBase64(url, { timeoutMs: 15000 });
+        const fetched = await fetchImageAsBase64(url, { timeoutMs: 15000, signal });
         return { type: "input_image", image_url: fetched?.url || url, detail };
       });
       item.content = await Promise.all(pending);
@@ -404,6 +378,7 @@ export class CodexExecutor extends BaseExecutor {
   }
 
   async execute(args) {
+    args.signal?.throwIfAborted();
     // BaseExecutor resolves the URL before calling transformRequest(), so capture
     // the endpoint choice here to keep normal and compact requests independent.
     this._isCompact = !!args.body?._compact;
@@ -412,21 +387,25 @@ export class CodexExecutor extends BaseExecutor {
     dbg("CODEX", `execute start | inputItems=${inputLen} | images=${imgCount} | sessionId=${this._currentSessionId || "pending"}`);
     if (imgCount > 0) {
       const t0 = Date.now();
-      await this.prefetchImages(args.body);
+      await this.prefetchImages(args.body, args.signal);
       dbg("CODEX", `prefetchImages done | ${Date.now() - t0}ms`);
     } else {
-      await this.prefetchImages(args.body);
+      await this.prefetchImages(args.body, args.signal);
     }
 
     // Retry loop for SSE-level overloaded errors (200 OK body contains event: error)
     // Reuses 503 retry config — same semantic: upstream temporarily unavailable
     const retryConfig = { ...DEFAULT_RETRY_CONFIG, ...this.config.retry };
     const { attempts, delayMs } = resolveRetryEntry(retryConfig[503]);
+    const retryBudget = { remaining: Math.max(...Object.values(retryConfig).map((entry) => resolveRetryEntry(entry).attempts)) };
     let attempt = 0;
     while (true) {
-      const result = await super.execute(args);
+      args.signal?.throwIfAborted();
+      const result = await super.execute({ ...args, retryBudget });
       args.diagnostics?.phase("preflight");
-      const peek = await this._peekSseTransientError(result.response);
+      let peek;
+      try { peek = await this._peekSseTransientError(result.response, { signal: args.signal }); }
+      catch (error) { error.fallbackScope = FALLBACK_SCOPE_REQUEST; throw error; }
       if (!peek.matched) {
         // Replace body with re-assembled stream (prefix bytes already read + rest)
         if (peek.replacementBody) {
@@ -443,73 +422,115 @@ export class CodexExecutor extends BaseExecutor {
         result.response = codexSseErrorResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, peek.message || CODEX_MODEL_CAPACITY_MESSAGE);
         return result;
       }
-      if (attempt >= attempts) {
+      if (attempt >= attempts || retryBudget.remaining <= 0) {
         args.log?.warn?.("RETRY", `CODEX | SSE overloaded "${peek.matched}" — retries exhausted (${attempt}/${attempts})`);
         result.response = codexSseErrorResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, peek.message || peek.matched);
         return result;
       }
       attempt++;
+      retryBudget.remaining--;
       args.log?.debug?.("RETRY", `CODEX | SSE "${peek.matched}" retry ${attempt}/${attempts} after ${delayMs / 1000}s`);
       dbg("CODEX", `SSE overloaded "${peek.matched}" → retry ${attempt}/${attempts} in ${delayMs}ms`);
-      await new Promise(r => setTimeout(r, delayMs));
+      await delay(delayMs, undefined, { signal: args.signal });
     }
   }
 
-  // Peek first N bytes of SSE body to detect upstream transient errors.
-  // Returns { matched: string|null, message: string|null, accountFallback: boolean, replacementBody: ReadableStream|null }.
-  // Caller must use replacementBody when no error matched (original body has been read).
-  async _peekSseTransientError(response) {
-    if (!response || !response.ok || !response.body) return { matched: null, message: null, accountFallback: false, replacementBody: null };
+  // Keep one reader (and at most one pending read) across the bounded preflight.
+  async _peekSseTransientError(response, { signal, timeoutMs = CODEX_SSE_PEEK_TIMEOUT_MS, maxBytes = CODEX_SSE_PEEK_BYTES } = {}) {
+    signal?.throwIfAborted();
+    if (!response?.ok || !response.body || !(response.headers.get("content-type") || "").includes("text/event-stream")) {
+      return { matched: null, replacementBody: null };
+    }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
     const chunks = [];
-    let text = "";
+    let pendingRead = null;
+    let eof = false;
+    let stopped = false;
+    let cancelled = false;
+    let released = false;
+    let outputController;
     let matched = null;
+    let message = null;
     let accountFallback = false;
-    try {
-      while (text.length < CODEX_SSE_PEEK_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        text += decoder.decode(value, { stream: true });
-        const lowerText = text.toLowerCase();
-        const accountHit = CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS.find(p => lowerText.includes(p));
-        if (accountHit) { matched = accountHit; accountFallback = true; break; }
-        const retryHit = CODEX_SSE_RETRY_PATTERNS.find(p => lowerText.includes(p));
-        if (retryHit) { matched = retryHit; break; }
-        if (CODEX_SSE_USER_OUTPUT_PATTERNS.some(p => lowerText.includes(p))) break;
+    let bytes = 0;
+    let timer;
+    let rejectAbort;
+    const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+    aborted.catch(() => {});
+    const release = () => {
+      if (released) return;
+      released = true;
+      signal?.removeEventListener("abort", onAbort);
+      reader.releaseLock();
+    };
+    const cancel = async (reason) => {
+      cancelled = true;
+      try { await reader.cancel(reason); } catch { /* stream may already be errored */ }
+      finally { release(); }
+    };
+    const onAbort = () => {
+      const error = new DOMException("Request aborted", "AbortError");
+      rejectAbort(error);
+      outputController?.error(error);
+      void cancel(error);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+    const decoder = createResponsesFrameDecoder(({ event, data, done }) => {
+      if (!data && !done) return;
+      // Only structured rejection envelopes are retryable, never ordinary text.
+      const error = data?.error || data?.response?.error || (event === "error" ? data : null);
+      if (error && (!event || event === "error" || event === "response.failed")) {
+        const text = [error.code, error.type, error.message].filter((part) => typeof part === "string").join(" ").toLowerCase();
+        matched = CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS.find((pattern) => text.includes(pattern)) || null;
+        accountFallback = !!matched;
+        matched ||= CODEX_SSE_RETRY_PATTERNS.find((pattern) => text.includes(pattern)) || null;
+        if (matched) message = typeof error.message === "string" ? error.message : matched;
       }
-    } catch (e) {
-      dbg("CODEX", `peek read error: ${e.message}`);
-    }
+      stopped = true;
+      return false;
+    }, maxBytes);
+    try {
+      signal?.throwIfAborted();
+      while (!stopped && bytes < maxBytes) {
+        pendingRead ||= reader.read();
+        const read = await Promise.race([pendingRead, deadline, aborted]);
+        if (!read) break;
+        pendingRead = null;
+        if (read.done) { eof = true; break; }
+        chunks.push(read.value);
+        const prefix = read.value.subarray(0, maxBytes - bytes);
+        bytes += read.value.byteLength;
+        // The live Responses path owns malformed/oversized protocol failures.
+        try { decoder.push(prefix); } catch { stopped = true; }
+      }
+      if (matched) {
+        await cancel();
+        return { matched, message, accountFallback, replacementBody: null };
+      }
+    } catch (error) {
+      await cancel(error);
+      throw error;
+    } finally { clearTimeout(timer); }
 
-    if (matched) {
-      try { await reader.cancel(); } catch { /* noop */ }
-      try { reader.releaseLock(); } catch { /* noop */ }
-      return { matched, message: extractSseErrorMessage(text, matched), accountFallback, replacementBody: null };
-    }
-
-    reader.releaseLock();
-
-    // Re-assemble stream: prefix chunks + remaining upstream body
-    const upstream = response.body;
-    let upstreamReader = null;
     const replacementBody = new ReadableStream({
-      start(controller) {
-        for (const c of chunks) controller.enqueue(c);
-        upstreamReader = upstream.getReader();
-      },
+      start(controller) { outputController = controller; },
       async pull(controller) {
+        if (cancelled) return;
+        if (chunks.length) { controller.enqueue(chunks.shift()); return; }
+        if (eof) { release(); controller.close(); return; }
         try {
-          const { done, value } = await upstreamReader.read();
-          if (done) { controller.close(); return; }
+          const { done, value } = await (pendingRead ||= reader.read());
+          pendingRead = null;
+          if (cancelled) return;
+          if (done) { release(); controller.close(); return; }
           controller.enqueue(value);
-        } catch (e) { controller.error(e); }
+        } catch (error) {
+          if (!cancelled) { release(); controller.error(error); }
+        }
       },
-      cancel(reason) {
-        try { upstreamReader?.cancel(reason); } catch { /* noop */ }
-      },
-    });
+      cancel,
+    }, { highWaterMark: 0 });
     return { matched: null, message: null, accountFallback: false, replacementBody };
   }
 

@@ -12,6 +12,9 @@ export const CODEX_STREAM_DIAGNOSTICS = Object.freeze({
   errorCodes: ["UND_ERR_SOCKET", "UND_ERR_BODY_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_CONNECT_TIMEOUT", "ECONNRESET", "ETIMEDOUT", "EPIPE", "STREAM_STALL_TIMEOUT", "STREAM_PROTOCOL_ERROR", "CLIENT_CANCELLED"],
 });
 
+export const CODEX_SSE_RETRY_PATTERNS = ["server_is_overloaded", "service_unavailable_error"];
+export const CODEX_SSE_ACCOUNT_FALLBACK_PATTERNS = ["selected model is at capacity", "model_at_capacity"];
+
 export function isCodexAstraModel(modelId) {
   if (typeof modelId !== "string") return false;
   return modelId === CODEX_ASTRA_MODEL_ID

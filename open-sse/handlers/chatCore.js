@@ -75,7 +75,8 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, streamDiagnostics }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, streamDiagnostics, requestSignal }) {
+  if (requestSignal?.aborted) return createErrorResult(499, "Request aborted", undefined, FALLBACK_SCOPE_REQUEST);
   const { provider, model } = modelInfo;
   streamDiagnostics ??= provider === "codex" ? createCodexStreamDiagnostics({ log }) : null;
   const requestStartTime = Date.now();
@@ -180,7 +181,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
     // Convert remote image URLs to base64 for targets that can't fetch URLs.
     try {
-      const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal: undefined });
+      const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal: requestSignal });
       if (n > 0) log?.debug?.("MODALITY", `prefetched ${n} remote image(s) for ${targetFormat}`);
     } catch (e) { log?.warn?.("MODALITY", `image prefetch failed: ${e.message}`); }
   }
@@ -324,6 +325,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // system/tools/messages, and a stale anchor costs a full prefix rewrite.
   if (passthrough && clientTool === "claude") anchorClaudeCache(translatedBody);
 
+  if (requestSignal?.aborted) return createErrorResult(499, "Request aborted", undefined, FALLBACK_SCOPE_REQUEST);
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
   appendRequestLog({ model, provider, connectionId, status: "PENDING" }).catch(() => { });
@@ -331,14 +333,21 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const msgCount = translatedBody.messages?.length || translatedBody.input?.length || translatedBody.contents?.length || translatedBody.request?.contents?.length || 0;
   log?.debug?.("REQUEST", `${provider.toUpperCase()} | ${model} | ${msgCount} msgs`);
 
+  let pendingReleased = false;
+  const releasePending = (failed = false) => {
+    if (pendingReleased) return;
+    pendingReleased = true;
+    trackPendingRequest(model, provider, connectionId, false, failed);
+  };
   const streamController = createStreamController({
+    requestSignal,
     onDisconnect: (reason) => {
-      trackPendingRequest(model, provider, connectionId, false);
+      releasePending();
       if (onDisconnect) onDisconnect(reason);
     },
-    onError: () => trackPendingRequest(model, provider, connectionId, false),
+    onError: () => releasePending(),
     onComplete: stream && clientRequestedStreaming && sourceFormat === FORMATS.OPENAI_RESPONSES && targetFormat === FORMATS.OPENAI_RESPONSES
-      ? () => trackPendingRequest(model, provider, connectionId, false) : null,
+      ? () => releasePending() : null,
     log, provider, model, reqTag, diagnostics: streamDiagnostics
   });
 
@@ -383,13 +392,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   try {
     const result = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions, diagnostics: streamDiagnostics });
     providerResponse = result.response;
+    if (streamController.signal?.aborted) {
+      await providerResponse.body?.cancel().catch(() => {});
+      throw new DOMException("Request aborted", "AbortError");
+    }
     providerUrl = result.url;
     providerHeaders = result.headers;
     finalBody = result.transformedBody;
     providerResponseFormat = result.responseFormat || targetFormat;
     reqLogger.logTargetRequest(providerUrl, providerHeaders, finalBody);
   } catch (error) {
-    const aborted = error.name === "AbortError";
+    const aborted = streamController.signal?.aborted || error.name === "AbortError";
     streamDiagnostics?.finish(aborted ? "cancelled" : "failed", error);
     const numericErrorStatus = Number(error.status);
     const errorStatus = aborted
@@ -398,7 +411,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         ? numericErrorStatus
         : HTTP_STATUS.BAD_GATEWAY);
     const fallbackScope = aborted ? FALLBACK_SCOPE_REQUEST : normalizeFallbackScope(error.fallbackScope);
-    trackPendingRequest(model, provider, connectionId, false, true);
+    releasePending(true);
+    streamController.handleError(error);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${errorStatus}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
@@ -440,7 +454,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     isCodexAstraModel(model) &&
     providerResponse.status === HTTP_STATUS.FORBIDDEN
   ) {
-    authErrorPreview = await parseUpstreamError(providerResponse.clone(), executor);
+    authErrorPreview = await parseUpstreamError(providerResponse, executor);
   }
   const shouldRefreshAuthError =
     providerResponse.status === HTTP_STATUS.UNAUTHORIZED ||
@@ -451,19 +465,22 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Handle account-scoped 401/403 - try token refresh (skip for noAuth providers)
   if (!executor.noAuth && shouldRefreshAuthError) {
+    authErrorPreview ||= await parseUpstreamError(providerResponse, executor);
     try {
+      streamController.signal?.throwIfAborted();
       // Mutate credentials after each successful refresh: rotating refresh_token
       // providers (xAI/grok-cli) issue a new RT on every refresh; without this,
       // refreshWithRetry's 2nd/3rd attempt reuses the already-consumed RT →
       // invalid_grant → auth_failed retryable=false.
       const newCredentials = await refreshWithRetry(async () => {
+        streamController.signal?.throwIfAborted();
         const result = await executor.refreshCredentials(credentials, log);
         if (result?.refreshToken && result.refreshToken !== credentials.refreshToken) {
           if (result.accessToken) credentials.accessToken = result.accessToken;
           credentials.refreshToken = result.refreshToken;
         }
         return result;
-      }, 3, log);
+      }, 3, log, streamController.signal);
       if (newCredentials?.accessToken || newCredentials?.copilotToken) {
         if (log?.line) log.line(reqTag, "🔑", `TOKEN REFRESHED · ${provider}/${model}`);
         Object.assign(credentials, newCredentials);
@@ -471,12 +488,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
           try { await onCredentialsRefreshed(newCredentials); } catch (e) { log?.warn?.("TOKEN", `onCredentialsRefreshed failed: ${e.message}`); }
         }
         try {
+          streamController.signal?.throwIfAborted();
           const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions, diagnostics: streamDiagnostics });
           if (retryResult.response.ok) {
             providerResponse = retryResult.response;
+            authErrorPreview = null;
             providerUrl = retryResult.url;
             providerResponseFormat = retryResult.responseFormat || targetFormat;
-          }
+          } else await retryResult.response.body?.cancel().catch(() => {});
         } catch { log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`); }
       } else {
         log?.warn?.("TOKEN", `${provider.toUpperCase()} | refresh failed`);
@@ -486,11 +505,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
   }
 
+  if (streamController.signal?.aborted) {
+    await providerResponse.body?.cancel().catch(() => {});
+    releasePending();
+    return createErrorResult(499, "Request aborted", undefined, FALLBACK_SCOPE_REQUEST);
+  }
+
   // Provider returned error
   if (!providerResponse.ok) {
-    trackPendingRequest(model, provider, connectionId, false, true);
+    releasePending(true);
     const { statusCode, message, resetsAtMs, fallbackScope } =
-      authErrorPreview && providerResponse.status === HTTP_STATUS.FORBIDDEN
+      authErrorPreview
         ? authErrorPreview
         : await parseUpstreamError(providerResponse, executor);
     logCodexDecision({
@@ -518,6 +543,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       const urlStr = providerUrl ? `\n    URL: ${providerUrl}` : "";
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);
     }
+    streamController.handleError(new Error(message));
     reqLogger.logError(new Error(message), finalBody || translatedBody);
     return createErrorResult(statusCode, errMsg, resetsAtMs, fallbackScope);
   }
@@ -532,7 +558,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
-  const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
+  const trackDone = () => releasePending();
 
   // Provider forced streaming but client wants JSON
   if (!clientRequestedStreaming && providerRequiresStreaming) {

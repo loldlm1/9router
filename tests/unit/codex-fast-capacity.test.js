@@ -42,6 +42,7 @@ describe("Codex fast tier and capacity handling", () => {
       "event: error",
       'data: {"error":{"message":"Selected model is at capacity. Please try a different model."}}',
       "",
+      "",
     ].join("\n")), {
       status: 200,
       headers: { "Content-Type": "text/event-stream" },

@@ -35,6 +35,7 @@ import { createCodexStreamDiagnostics } from "open-sse/utils/codexObservability.
  * Format detection and translation handled by translator
  */
 export async function handleChat(request, clientRawRequest = null) {
+  if (request?.signal?.aborted) return errorResponse(499, "Request aborted");
   let body;
   try {
     body = await request.json();
@@ -236,6 +237,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastStatus = null;
 
   while (true) {
+    if (request?.signal?.aborted) return errorResponse(499, "Request aborted");
     let acquisition;
     try {
       acquisition = await acquireProviderCredentials(
@@ -273,7 +275,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     let refreshedCredentials;
     try {
       // Account selection shown in the unified "▶" line (acc:...)
+      request?.signal?.throwIfAborted();
       refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+      request?.signal?.throwIfAborted();
 
       // Ensure real project ID is available for providers that need it (P0 fix: cold miss)
       if ((provider === "antigravity" || provider === "gemini-cli") && !refreshedCredentials.projectId) {
@@ -297,6 +301,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         connectionId: credentials.connectionId,
         userAgent,
         streamDiagnostics,
+        requestSignal: request?.signal,
         apiKey,
         ccFilterNaming: !!chatSettings.ccFilterNaming,
         rtkEnabled: !!chatSettings.rtkEnabled,
@@ -333,12 +338,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       });
     } catch (error) {
       lease.release();
+      if (request?.signal?.aborted) return errorResponse(499, "Request aborted");
       throw error;
     }
 
     if (result.success) {
       try {
-        return bindResponseLifecycle(result.response, () => lease.release());
+        return bindResponseLifecycle(result.response, () => lease.release(), request?.signal);
       } catch (error) {
         lease.release();
         throw error;
@@ -347,6 +353,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     // A failed attempt must free its account before request-scoped return or fallback.
     lease.release();
+    if (request?.signal?.aborted) return errorResponse(499, "Request aborted");
 
     if (isRequestScopedFallback(result.fallbackScope)) {
       log.warn("FALLBACK", `REQUEST ERROR (${result.status}) · ${provider}/${model} · account rotation skipped`);

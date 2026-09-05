@@ -15,14 +15,15 @@ function getTimeString() {
  * @param {string} options.provider - Provider name
  * @param {string} options.model - Model name
  */
-export function createStreamController({ onDisconnect, onError, onComplete, log, provider, model, reqTag = "", diagnostics = null } = {}) {
+export function createStreamController({ onDisconnect, onError, onComplete, log, provider, model, reqTag = "", diagnostics = null, requestSignal } = {}) {
   const abortController = new AbortController();
   const startTime = Date.now();
   let disconnected = false;
   const notify = (callback, value) => {
     try { Promise.resolve(callback?.(value)).catch(() => {}); } catch { /* cleanup is best effort */ }
   };
-  return {
+  const detach = () => requestSignal?.removeEventListener("abort", onAbort);
+  const controller = {
     signal: abortController.signal,
     startTime,
     diagnostics,
@@ -30,6 +31,7 @@ export function createStreamController({ onDisconnect, onError, onComplete, log,
     handleDisconnect(reason = "client_closed") {
       if (disconnected) return;
       disconnected = true;
+      detach();
       diagnostics?.finish("cancelled", Object.assign(new Error(), { code: "CLIENT_CANCELLED" }));
       abortController.abort(new DOMException("Client disconnected", "AbortError"));
       notify(onDisconnect, { reason, duration: Date.now() - startTime });
@@ -37,12 +39,14 @@ export function createStreamController({ onDisconnect, onError, onComplete, log,
     handleComplete(outcome = "eof") {
       if (disconnected) return;
       disconnected = true;
+      detach();
       diagnostics?.finish(outcome);
       notify(onComplete, outcome);
     },
     handleError(error) {
       if (disconnected) return;
       disconnected = true;
+      detach();
       diagnostics?.finish(error?.name === "AbortError" ? "cancelled" : "failed", error);
       if (!diagnostics) {
         const status = error?.name === "AbortError" ? "ABORTED" : `ERROR: ${error?.message}${error?.stack ? `\n    ${error.stack}` : ""}`;
@@ -53,6 +57,10 @@ export function createStreamController({ onDisconnect, onError, onComplete, log,
     },
     abort: (reason) => abortController.abort(reason),
   };
+  const onAbort = () => controller.handleDisconnect("request_aborted");
+  if (requestSignal?.aborted) onAbort();
+  else requestSignal?.addEventListener("abort", onAbort, { once: true });
+  return controller;
 }
 
 /**
@@ -215,8 +223,8 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   });
 
   const transformedBody = providerResponse.body
-    .pipeThrough(upstreamTap)
-    .pipeThrough(transformStream);
+    .pipeThrough(upstreamTap, { signal: streamController.signal })
+    .pipeThrough(transformStream, { signal: streamController.signal });
 
   return createDisconnectAwareStream(
     { readable: transformedBody, writable: { getWriter: () => ({ abort: () => Promise.resolve() }) } },

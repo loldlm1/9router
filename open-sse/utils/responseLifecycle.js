@@ -1,4 +1,4 @@
-export function bindResponseLifecycle(response, onSettled) {
+export function bindResponseLifecycle(response, onSettled, signal) {
   if (!(response instanceof Response)) {
     throw new TypeError("response must be a Response");
   }
@@ -7,9 +7,11 @@ export function bindResponseLifecycle(response, onSettled) {
   }
 
   let settled = false;
+  let onAbort;
   const settle = () => {
     if (settled) return false;
     settled = true;
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
     try {
       onSettled();
     } catch {
@@ -32,17 +34,30 @@ export function bindResponseLifecycle(response, onSettled) {
   }
 
   const body = new ReadableStream({
+    start(controller) {
+      onAbort = () => {
+        if (!settle()) return;
+        void reader.cancel(signal.reason).catch(() => {}).finally(() => reader.releaseLock());
+        controller.close();
+      };
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+    },
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
+        if (settled) return;
         if (done) {
           settle();
+          reader.releaseLock();
           controller.close();
           return;
         }
         controller.enqueue(value);
       } catch (error) {
+        if (settled) return;
         settle();
+        reader.releaseLock();
         controller.error(error);
       }
     },
@@ -51,6 +66,7 @@ export function bindResponseLifecycle(response, onSettled) {
         await reader.cancel(reason);
       } finally {
         settle();
+        reader.releaseLock();
       }
     },
   });

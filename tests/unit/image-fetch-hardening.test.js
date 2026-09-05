@@ -18,14 +18,14 @@ function mockFetchOnce(bytes, ok = true) {
       };
     },
   };
-  globalThis.fetch = vi.fn(async () => ({ ok, body }));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok, body })));
 }
 
 beforeEach(() => {
   lookupMock.mockReset();
-  lookupMock.mockResolvedValue({ address: "93.184.216.34" }); // public by default
+  lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]); // public by default
 });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("fetchImageAsBase64 hardening", () => {
   it("rejects non-http url", async () => {
@@ -34,12 +34,12 @@ describe("fetchImageAsBase64 hardening", () => {
   });
 
   it("SSRF: rejects private IP (10.x)", async () => {
-    lookupMock.mockResolvedValue({ address: "10.0.0.5" });
+    lookupMock.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
     expect(await fetchImageAsBase64("http://internal.example/x.png")).toBeNull();
   });
 
   it("SSRF: rejects cloud metadata 169.254.169.254", async () => {
-    lookupMock.mockResolvedValue({ address: "169.254.169.254" });
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
     expect(await fetchImageAsBase64("http://metadata/x.png")).toBeNull();
   });
 
@@ -48,7 +48,7 @@ describe("fetchImageAsBase64 hardening", () => {
   });
 
   it("SSRF: rejects IPv6 loopback", async () => {
-    lookupMock.mockResolvedValue({ address: "::1" });
+    lookupMock.mockResolvedValue([{ address: "::1", family: 6 }]);
     expect(await fetchImageAsBase64("http://x/y.png")).toBeNull();
   });
 
@@ -73,5 +73,29 @@ describe("fetchImageAsBase64 hardening", () => {
   it("returns null when fetch not ok", async () => {
     mockFetchOnce(PNG, false);
     expect(await fetchImageAsBase64("https://example.com/404.png")).toBeNull();
+  });
+});
+
+
+describe("image prefetch cancellation budget", () => {
+  it.each(["timeout", "client"])("retains both timeout and caller abort (%s)", async (cause) => {
+    vi.useFakeTimers();
+    let started;
+    const fetched = new Promise((resolve) => { started = resolve; });
+    let upstreamSignal;
+    vi.stubGlobal("fetch", vi.fn((_url, { signal }) => {
+      upstreamSignal = signal;
+      started();
+      return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    }));
+    const abort = new AbortController();
+    const pending = fetchImageAsBase64("https://example.com/a.png", { signal: abort.signal, timeoutMs: 20 });
+    await fetched;
+    if (cause === "timeout") await vi.advanceTimersByTimeAsync(20);
+    else abort.abort();
+    expect(await pending).toBeNull();
+    expect(upstreamSignal.aborted).toBe(true);
+    expect(abort.signal.aborted).toBe(cause === "client");
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
