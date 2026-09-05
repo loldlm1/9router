@@ -1,7 +1,7 @@
 # Plan: Codex Long-Task Stream Reliability
 
 **Generated**: 2026-09-05
-**Status**: S1 `8dc5f120`, S2 `4f1419b1`, S3 `30d00735` committed; Sprint 4 validated (84 tests), commit gate next
+**Status**: Local sprint batch complete; manual VPS rollout and actual Codex acceptance pending
 **Estimated complexity**: High
 **Sprints**: 5, executed in order
 **Source review baseline**: `9f57d45c` (`docs: finalize Astra VPS handoff`)
@@ -20,10 +20,12 @@ closed the connection on the VPS. Implementation should correct those defects,
 test the actual transport boundaries, and validate the result on the VPS before
 claiming the reported incident is resolved.
 
-This planning turn inspects source, test definitions, and official documentation.
-It does not search local incident logs, inspect local Codex sessions or credentials,
-reproduce the incident locally, connect to the VPS, run tests, or change runtime
-state. The only artifact created is this plan.
+The initial planning turn inspected source, test definitions, and official
+documentation and created only this plan. The subsequently authorized sprint
+batch used synthetic tests and isolated data. It did not search local incident
+logs, inspect personal Codex sessions or real provider data, or connect to the VPS.
+The user will pull, rebuild, and start 9router on the VPS manually; operational
+acceptance remains separate from the completed local implementation batch.
 
 ## Review Findings
 
@@ -240,8 +242,9 @@ response-stream duration limits.
    auth files, proxy credentials, headers, or prompts.
 4. Access to an isolated VPS canary, a credential available there for the selected
    model, and the deployment/rollback authority for that environment are needed
-   for Sprint 5 operational completion. Their absence does not block writing this
-   plan or the earlier code/test work. It does block claiming VPS resolution.
+   for operational completion. Per the user's execution instruction, they are
+   prerequisites for the later live checks, not the local Sprint 5 commit and
+   handoff. Their absence blocks claiming VPS resolution.
 5. Preserve a known-good release artifact and its environment/proxy configuration
    before promotion. New and old versions must use compatible existing data;
    no schema migration is planned. A canary uses separate test data and must not
@@ -751,19 +754,28 @@ deployed settings and drain any pools before process replacement.
 - [x] Timeout behavior is verified through real fetch, not only mocks.
 - [x] Heartbeat, backpressure, framing, and cleanup tests pass.
 - [x] Configuration documentation and residual risks match the implementation.
-- [ ] Exactly one Sprint 4 commit created; rollback point recorded.
-- [ ] Sprint 5 has not started before this gate passes.
+- [x] Exactly one Sprint 4 commit created; rollback point recorded.
+- [x] Sprint 5 has not started before this gate passes.
 
 ## Sprint 5: Validate The Transport And VPS Recovery Path
 
-**Goal**: Demonstrate correct recovery and long-task continuity through the
-actual client/VPS path, and prepare a reproducible release with practical rollback.
+**Goal**: Validate the router over real synthetic sockets and prepare the manual
+VPS handoff, then demonstrate recovery and long-task continuity through the
+actual client/VPS path after the user starts the candidate.
 
-**Dependencies**: Sprint 4 gate, isolated canary access, candidate build, known
-rollback artifact, and the affected Codex build/provider configuration.
+**Dependencies**: The local gate needs Sprint 4, synthetic fixtures, and a
+candidate build. Later operational acceptance needs isolated canary access,
+a known rollback artifact, and the affected Codex build/provider configuration.
+
+**Execution adjustment (2026-09-05)**: The user explicitly owns the VPS pull and
+startup. Finish local validation and the single Sprint 5 commit without starting
+or changing the VPS. Tasks 5.2 and 5.3 remain operational acceptance work after
+manual startup; they are not counted as passing local checks. The local gate
+accepts documented, unchanged baseline failures in unrelated regression suites
+while requiring the scoped stream checks and build to pass.
 
 **Tracked scope**: `tests/integration/codex-stream-transport.test.js`,
-`tests/helpers/codex-stream-fixtures.js`,
+`tests/helpers/codex-socket-fixtures.js`,
 `tests/unit/codex-admission-shadow-load.test.js`,
 `docs/codex-stream-reliability.md`; update
 `gitbook/content/en/integration/codex.md` with a runbook link if appropriate.
@@ -802,6 +814,7 @@ this sprint and rerun the affected earlier checks before its single commit.
 
 ### Task 5.2: Fingerprint the VPS path and run an isolated canary
 
+- **Status**: Pending user-operated VPS startup; no VPS operation was performed.
 - **Location**: VPS canary release, its ingress/outbound route, and runbook worksheet.
 - **Work**: Record the prerequisite metadata on the affected deployment and
   client; compare deployed source with the review baseline. Use the existing
@@ -842,6 +855,7 @@ this sprint and rerun the affected earlier checks before its single commit.
 
 ### Task 5.3: Verify Codex task continuity and prepare promotion
 
+- **Status**: Pending deployed runtime/route checks and the affected Codex client.
 - **Location**: Affected Codex version, dedicated canary provider entry, disposable
   task workspace, VPS canary, and runbook.
 - **Work**: Record `codex --version` on the affected client. Use a dedicated
@@ -900,17 +914,47 @@ previous release path/image digest, prior environment/provider/proxy settings,
 and exact supervisor commands for switchback. Keep release identifiers in an
 operator-owned worksheet; put only sanitized procedure/results in the repository.
 
-### Sprint 5 Gate
+### Sprint 5 Local Gate And Execution Record
 
-- [ ] Integration, regression, build, VPS canary, and actual Codex checks pass.
-- [ ] No local incident logs or real local provider data were used as evidence.
-- [ ] Candidate behavior, versions, metrics, residual risks, and rollback are recorded.
-- [ ] Exactly one Sprint 5 commit created with the proposed message; its tree
-  matches the validated candidate changes and its rollback point is recorded.
-- [ ] A concrete release artifact and exact promotion/switchback commands are ready.
-- [ ] Production promotion occurs only within the later granted deployment
-  authority. If that authority is absent, finish all staging/review work before
-  requesting it; do not report production resolution before the release checks.
+- [x] Final integration/admission/lifecycle run: 24 tests passed across 3 suites.
+- [x] Repeated socket faults: 100 requests at concurrency five yielded exactly
+  20 completed, 60 failed, 20 cancelled, 100 attempts/releases, and empty pending,
+  active, and queued counts. Every individual fault case asserts no router replay.
+- [x] Production build and standalone asset-copy passed; HTTP server regression
+  passed (1 test). The isolated app returned health OK and matching 401 responses
+  for both route aliases; its smoke driver had an incorrect expectation, so this
+  is partial startup/authentication evidence, not authenticated streaming proof.
+- [x] Broad offline regression was run and compared with `9f57d45c`. After fixing
+  three new harness failures and rerunning the scoped suite, all 82 remaining
+  test failures and four suite-loading errors reproduce in 20 baseline suites.
+  Exact existing failure labels match; the full suite remains failing.
+- [x] No local incident logs or real local provider data were used as evidence.
+- [x] Candidate versions, build ID, lockfile digest, commands, sample sizes,
+  test artifact paths, residual risks, and manual rollout/rollback are recorded
+  in `docs/codex-stream-reliability.md`.
+- [x] ESLint passed for both changed JavaScript test/fixture files; whitespace
+  validation passed.
+- [x] This increment is the single Sprint 5 commit with the proposed subject and
+  rollback parent `72a23200`; it changes only tests/docs. Its SHA is discoverable
+  from the integration file's creation commit, without amending its own record.
+
+### Pending Operational Acceptance
+
+- [ ] User pulls, rebuilds, and starts the candidate using the existing VPS method.
+- [ ] Deployed source/build/runtime, affected Codex build/settings, and actual
+  ingress/outbound path are recorded; exact service rollback commands are known.
+- [ ] Origin/public streaming and actual Codex parser/continuity checks in Tasks
+  5.2 and 5.3 pass, including cancellation/reuse and the 30-minute observation.
+- [ ] VPS incident resolution is assessed from the live results, with any
+  remaining upstream/client limitations recorded.
+
+Local output is `.next-cli-build/stream-reliability/standalone/`, build ID
+`t5Eej8I19aHTA32HBrE6Q`, on Node `24.6.0` / bundled Undici `7.13.0`, npm Undici
+`7.29.0`, and Next.js `16.2.12`. No artifact has been deployed. A VPS rebuild
+must be fingerprinted and validated on that runtime; local success cannot
+establish deployed streaming behavior. The temporary built-app process stopped
+after its smoke check. No VPS startup, restart, deployment, or configuration
+change is part of this local execution batch.
 
 ## Testing Strategy And Acceptance Matrix
 
@@ -954,22 +998,29 @@ contract, add the relevant checks and update the plan before expanding scope.
 
 ## Release And Rollback Procedure
 
+This procedure is the operator handoff. The user performs VPS pull/rebuild/start;
+the local commit batch does not execute these operations. Live verification
+follows manual startup. Preserve the current working artifact before switching.
+
 1. Prepare the candidate and capture the exact known-good release identity,
    supervisor command, provider settings, environment variable names/values in
    private operator storage, and ingress config backup. Do not print secrets or
    commit that storage. Record database/volume ownership; no restore is required
    for this code-only change.
-2. Validate the isolated candidate through both origin and public ingress and
-   the affected Codex build. Record the source tree/build digest that was
-   actually tested. Do not deploy `latest` or rebuild a different artifact and
-   assume it is equivalent; if the existing pipeline cannot pin the candidate,
-   resolve that release prerequisite without a deployment-platform migration.
-3. Complete the Sprint 5 gate and make its one commit. Confirm that the committed
-   candidate matches the validated source tree. Within granted deployment
-   authority, drain active Responses requests and promote that immutable
-   artifact with the existing deployment method. For the standalone runner,
-   prepare a separate release/build directory; `npm run vps -- --rebuild` is not
+2. Pull the five locally validated sprint commits with `git pull --ff-only origin master`
+   in the intended VPS checkout and record the revision. The user rebuilds and
+   starts the candidate using the existing deployment method. Record its artifact
+   identity and drain active Responses requests before replacing the serving
+   process. Prefer an isolated canary before replacing the serving release.
+   For the standalone runner, prepare a separate release/build directory;
+   `npm run vps -- --rebuild` is not
    a safe command to run blindly over the serving release.
+3. After manual startup, validate the candidate through both origin and public
+   ingress and the affected Codex build using Tasks 5.2 and 5.3. Record the source
+   tree/build digest that was actually tested. Do not rebuild a different artifact
+   and assume it is equivalent. If using a separate canary, the user promotes
+   that validated artifact with the existing deployment method after draining
+   active streams. Do not claim the incident resolved before the live checks.
 4. After promotion, verify `/api/health`, one actual Responses completion, one
    cancellation/reuse flow, and the absence of leftover active/queued work.
    Observe at least the same 30-minute window used for canary. Compare first-event
@@ -988,11 +1039,11 @@ contract, add the relevant checks and update the plan before expanding scope.
 
 ## Execution Order And Handoff
 
-Before later implementation, read
-`/home/loldlm/.codex/skills/planner/references/execution-state.md` and initialize
-the planner's active-plan state. Update it after validation, commit, blocker,
-sprint-advance, and completion transitions. This planning turn does not initialize
-that state and does not create any proposed commit.
+Execution used the planner's active-plan state and updated validation, commit,
+and sprint transitions in order. On continuation, inspect that state before
+making changes; do not initialize a second execution or repeat completed sprints.
+Mark local implementation complete after the Sprint 5 commit while retaining
+the separate operational checklist above for the user-owned VPS handoff.
 
 For **every** sprint: complete its tasks, run and record its validation, document
 residual risks, create **exactly one sprint-specific commit**, and record the
@@ -1003,7 +1054,7 @@ authorized. An unresolved operational prerequisite remains explicit and does not
 become a passing check merely because code/tests are complete.
 
 Dependency order is `Sprint 1 -> Sprint 2 -> Sprint 3 -> Sprint 4 -> Sprint 5`,
-followed by the authorized promotion and observation procedure. No later sprint
+followed by the user-operated rollout and live observation procedure. No later sprint
 starts speculatively. Within a sprint, fixture/diagnostic documentation can run
 independently of code once the contract is fixed, and independent test commands
 can run together only with isolated state. Shared stream/executor edits are
@@ -1011,13 +1062,14 @@ sequential. This is a dependency map, not authorization to spawn sub-agents.
 
 ## Completion Checklist
 
-- [ ] All five sprint gates passed, with exactly one commit and rollback point each.
-- [ ] Source-confirmed defects corrected without fabricating Responses success.
-- [ ] Cancellation and recovery leave no abandoned work or duplicate router replay.
-- [ ] Actual dispatcher, Codex parser, and VPS ingress behavior verified.
-- [ ] Official documentation and candidate/deployed versions recorded accurately.
-- [ ] Required build, regression, security, performance, and operational checks pass.
-- [ ] Authorized production promotion and post-deploy observation complete, or
-  explicitly reported as pending with the concrete remaining prerequisite.
-- [ ] Residual upstream/client limitations and tested sample sizes documented.
-- [ ] No claim of VPS incident resolution based only on source review or offline tests.
+- [x] Five local sprint gates completed, with one commit and rollback point each;
+  unchanged unrelated baseline failures are documented, not marked passing.
+- [x] Source-confirmed defects corrected without fabricating Responses success.
+- [x] Synthetic cancellation/fault cases leave no abandoned work or router replay.
+- [x] Actual local dispatcher behavior and candidate versions recorded accurately.
+- [x] Required local build, scoped tests, diagnostics/privacy, and concurrency
+  checks passed; broad regression failure comparison and smoke limits recorded.
+- [x] Manual VPS rollout and live acceptance explicitly reported as pending.
+- [ ] Deployed runtime, actual Codex parser/continuity, and VPS ingress verified.
+- [x] Residual upstream/client limitations and tested sample sizes documented.
+- [x] No claim of VPS incident resolution based only on source review or offline tests.

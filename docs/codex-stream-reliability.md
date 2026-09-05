@@ -36,10 +36,18 @@ a health check does not validate streaming.
 | 2 | 63 tests passed across terminal/framing, abort/outcome, diagnostics, lifecycle, native reasoning, and non-streaming suites; whitespace check passed | `8dc5f120` |
 | 3 | 71 tests passed across 10 startup, cancellation, capacity/fallback, admission, lifecycle, image, and concurrency suites; whitespace check passed | `4f1419b1` |
 | 4 | 84 tests passed across 8 timeout, heartbeat, framing, startup/cancellation, diagnostic, and base-retry suites; native loopback body/header timeout checks passed | `30d00735` |
+| 5 | 24 integration/admission/lifecycle tests passed; production build and HTTP server regression passed; broad-suite failures match the baseline (details below) | `72a23200` |
 
 Sprint 1 commit: `8dc5f120`. Sprint 2 commit: `4f1419b1`; rollback parent
 `8dc5f120`.
 Sprint 3 commit: `30d00735`; rollback parent `4f1419b1`.
+Sprint 4 commit: `72a23200`; rollback parent `30d00735`. Sprint 5 base is
+`72a23200`. Sprint 5 is the commit introducing
+`tests/integration/codex-stream-transport.test.js`, with subject
+`test(codex): verify long-stream recovery and document VPS rollout`.
+Resolve its SHA with `git log --diff-filter=A --format=%H -- tests/integration/codex-stream-transport.test.js`.
+The local sprint batch and the subsequent VPS validation have separate gates:
+the user owns the VPS pull, rebuild, and startup; live checks remain pending.
 
 Responses passthrough now uses the same framed stream path for Codex, Droid,
 and other user agents. Only a complete, valid terminal settles successfully.
@@ -170,3 +178,142 @@ Official references rechecked 2026-09-05:
 [ProxyAgent](https://github.com/nodejs/undici/blob/main/docs/docs/api/ProxyAgent.md).
 Installed-runtime socket tests determine the behavior of the candidate; current
 upstream documentation does not establish the VPS version or effective settings.
+
+## Sprint 5 local validation
+
+All tests used synthetic credentials and isolated data at
+`/tmp/9router-stream-qa-xzP2lm/data`, with `RUN_REAL=0`. No local incident logs,
+personal Codex sessions, or real provider accounts were used.
+
+The real Responses route, chat core, Codex executor, and admission slots were
+exercised over loopback sockets. The fixture checks resets before headers,
+before events, after creation, mid-text, mid-tool arguments, and after terminal;
+FIN without terminal; quiet streams; inactivity; client cancellation; outbound
+CONNECT proxy; and ingress buffering/read-idle/hard-cutoff behavior. Resets after
+commitment wait for downstream headers or the relevant event before injection.
+All individual fault cases assert one upstream attempt and preserved Astra/max
+settings. The test fixture uses 30 ms preflight, 1000 ms upstream read idle, and
+15 ms heartbeats; it does not simulate twelve minutes of real elapsed time.
+
+The mixed run issued 100 requests at concurrency five: exactly 20 completed,
+60 failed, and 20 cancelled, with 100 upstream attempts, 100 lease releases,
+100 pending acquisitions/releases, 20 success callbacks, and no active/queued
+admission slots or active upstream responses afterward. Existing admission
+shadow-load tests also passed. These are router cleanup and transport results;
+they do not demonstrate actual Codex task continuation or tool execution.
+
+Commands and results (2026-09-05):
+
+```bash
+DATA_DIR=/tmp/9router-stream-qa-xzP2lm/data RUN_REAL=0 \
+  rtk test npm --prefix tests test -- --config vitest.config.js \
+  integration/codex-stream-transport.test.js \
+  unit/codex-admission-shadow-load.test.js unit/response-lifecycle.test.js
+# PASS: 24 tests across 3 suites, including final no-replay assertions.
+
+DATA_DIR=/tmp/9router-stream-qa-xzP2lm/data RUN_REAL=0 \
+  NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-cli-build/stream-reliability \
+  rtk test npm run build
+# PASS: production build and standalone asset-copy step.
+
+node --test tests/unit/custom-server-h2c.test.cjs
+# PASS: 1 test.
+
+rtk test ./node_modules/.bin/eslint \
+  tests/integration/codex-stream-transport.test.js tests/helpers/codex-socket-fixtures.js
+# PASS: both changed JavaScript files.
+
+git diff --check
+# PASS: whitespace check.
+
+DATA_DIR=/tmp/9router-stream-qa-xzP2lm/data RUN_REAL=0 \
+  rtk test npm --prefix tests test -- --config vitest.config.js \
+  --exclude 'translator/real/**'
+# FAIL: existing baseline failures; see comparison below.
+```
+
+The broad run reported 227 passing suites, 21 failing suites, and four skipped;
+2387 passing tests, 85 failures, 17 expected failures, and 26 skipped. Three
+integration-harness failures were corrected, and the final 24-test command above
+passed. All remaining failures reproduce at `9f57d45c`: 82 failing tests plus
+four suite-loading errors across 20 existing suites. Comparing exact failure
+labels found no new or removed failures in those existing suites. Seven
+additional Responses/translator regression suites passed; the accompanying two
+Kiro failures also reproduced at baseline. The full suite is not green. Local
+acceptance is based on passing scoped checks and this baseline comparison, not
+on silently excluding or fixing unrelated defects.
+
+The baseline was extracted with `git archive 9f57d45c` into
+`/tmp/9router-stream-baseline-89njrr6w` with its own synthetic data. Private test
+artifacts, which are temporary and are not shipped to the VPS:
+
+- Candidate broad log: `/home/loldlm/.local/share/rtk/tee/1788623467_test.log`.
+- Baseline broad log: `/home/loldlm/.local/share/rtk/tee/1788623882_test.log`.
+- Exact-label comparison: `/tmp/9router-stream-qa-xzP2lm/regression-comparison.json`.
+- Additional regression log: `/home/loldlm/.local/share/rtk/tee/1788623876_test.log`.
+- Built-app smoke log: `/tmp/9router-stream-qa-xzP2lm/built-app-smoke.log`.
+
+The built app started with isolated data and returned `{"ok":true}` from
+`/api/health`. Both `/v1/responses` and `/api/v1/responses` returned the same
+`401 Missing API key`. The smoke driver exited unsuccessfully because it
+expected a missing-provider response instead of authentication rejection. This
+is partial startup/authentication-routing evidence, not an authenticated stream
+check. Its process was stopped afterward. Optional `better-sqlite3` binding
+warnings occurred on this Node version; the existing fallback allowed the build
+and health check to succeed. Native DB-dependent baseline tests remain failing.
+
+Candidate identifiers:
+
+- Runtime: Node `24.6.0`, bundled Undici `7.13.0`, npm Undici `7.29.0`, Next.js `16.2.12`.
+- Product source: `72a23200300145fb17736530d6915c44983930b6`; Sprint 5 changes only tests/docs.
+- Source tree at build: `038b5f400fd3a34305b3ba4556742a40bfe2e832` (plus uncommitted tests/docs).
+- Lockfile SHA-256: `3a2b7eaf85272b00c200e7842a008d12be5f2491c4f8ad3188f2dd8c18ddd38b`.
+- Local build: `.next-cli-build/stream-reliability`, build ID `t5Eej8I19aHTA32HBrE6Q`.
+- Standalone output: `.next-cli-build/stream-reliability/standalone/`.
+
+The local build is validation output, not a published release artifact. The VPS
+will build its own artifact after pulling; record that artifact's identity and
+repeat runtime/stream checks there. A matching source SHA does not prove the
+same runtime, native bindings, ingress behavior, or Codex recovery.
+
+## Manual VPS handoff
+
+The user will pull and start 9router manually. This implementation batch did not
+connect to, deploy to, start, restart, or change the VPS. Keep the exact current
+working release/build and its provider/environment/ingress settings available
+for rollback before replacing the serving process. No data migration is needed.
+
+In the intended VPS checkout on `master`, after the sprint commits are available
+on `loldlm1/9router`:
+
+```bash
+git pull --ff-only origin master
+git log -5 --oneline
+```
+
+The last five commits should be the ordered sprint commits in this execution
+record. Use the existing deployment method and supervisor to rebuild and start
+that revision. If the existing method is the repository's standalone runner,
+`npm run vps -- --rebuild` rebuilds and starts it; use it only in a separate
+release directory or after draining/stopping the old serving process. Pulling
+source alone does not replace a previously built/running artifact. Preserve the
+selected Astra model and reasoning settings.
+
+After manual startup, record the deployed revision, build/runtime and affected
+Codex version, origin/public routes, ingress limits, and outbound proxy mode
+using the worksheet. Then complete plan Tasks 5.2 and 5.3: both Responses route
+aliases, a timed stream of at least 12 minutes through origin/public ingress,
+actual parser behavior with heartbeat comments, cancellation followed by another
+request, controlled reconnect/next-step recovery, and the 30-minute live-task
+observation. These checks are pending; health and local socket tests cannot
+establish that the reported VPS interruption is resolved.
+
+For a stream-integrity, retry, or lease-cleanup regression, drain the candidate
+and restore the recorded previous release using the same supervisor, together
+with its previous timeout/heartbeat/provider/ingress settings. Confirm health
+and a completed Responses stream. Exact service commands belong in the VPS
+worksheet once the service is identified. For source rollback, revert dependent
+sprint commits in reverse order; the complete pre-batch baseline is `9f57d45c`.
+Do not reset the checkout, delete data volumes, or replay tools/conversation
+history. Heartbeats can be disabled for new requests using
+`CODEX_STREAM_HEARTBEAT_MS=0`, but that alone does not roll back the batch.

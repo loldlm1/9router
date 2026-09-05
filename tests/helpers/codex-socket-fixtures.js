@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, request } from "node:http";
 import { connect } from "node:net";
 import { once } from "node:events";
 
@@ -40,4 +40,39 @@ export async function listenConnectProxy(allowedOrigins) {
     upstream.on("close", () => socket.destroy());
   });
   return proxy;
+}
+
+export async function listenForwardingProxy(origin, { buffering = false, idleMs = 0, durationMs = 0 } = {}) {
+  const target = new URL(origin);
+  return listenLoopback((req, res) => {
+    let idleTimer;
+    let durationTimer;
+    const upstream = request({ hostname: target.hostname, port: target.port, path: req.url, method: req.method, headers: req.headers });
+    const stop = () => { upstream.destroy(); res.destroy(); };
+    const armIdle = () => {
+      clearTimeout(idleTimer);
+      if (idleMs) idleTimer = setTimeout(stop, idleMs);
+    };
+    upstream.on("error", () => res.destroy());
+    upstream.on("response", (response) => {
+      res.writeHead(response.statusCode, response.headers);
+      res.flushHeaders();
+      const chunks = [];
+      response.on("data", (chunk) => {
+        armIdle();
+        if (buffering) chunks.push(chunk);
+      });
+      response.on("error", stop);
+      if (buffering) response.on("end", () => res.end(Buffer.concat(chunks)));
+      else response.pipe(res);
+    });
+    res.on("close", () => {
+      clearTimeout(idleTimer);
+      clearTimeout(durationTimer);
+      upstream.destroy();
+    });
+    armIdle();
+    if (durationMs) durationTimer = setTimeout(stop, durationMs);
+    req.pipe(upstream);
+  });
 }
