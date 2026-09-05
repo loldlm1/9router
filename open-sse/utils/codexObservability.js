@@ -1,5 +1,6 @@
 import { FALLBACK_SCOPE_ACCOUNT, normalizeFallbackScope } from "../services/fallbackScope.js";
-import { getCodexAstraRouteId, isCodexAstraModel } from "../config/codexConstants.js";
+import { CODEX_STREAM_DIAGNOSTICS, getCodexAstraRouteId, isCodexAstraModel } from "../config/codexConstants.js";
+import { randomUUID } from "node:crypto";
 
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const ASTRA_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -90,4 +91,90 @@ export function formatCodexDecisionLog({
     `status=${safeStatus}`,
     `fallback_scope=${normalizeFallbackScope(fallbackScope)}`,
   ].join(" · ");
+}
+
+export function classifyCodexStreamError(error) {
+  const errorName = CODEX_STREAM_DIAGNOSTICS.errorNames.includes(error?.name) ? error.name : "Error";
+  let errorCode = "unknown";
+  let cause = error;
+  for (let depth = 0; cause && depth < CODEX_STREAM_DIAGNOSTICS.maxCauseDepth; depth++) {
+    if (CODEX_STREAM_DIAGNOSTICS.errorCodes.includes(cause.code)) {
+      errorCode = cause.code;
+      break;
+    }
+    cause = cause.cause;
+  }
+  return { error_name: errorName, error_code: errorCode };
+}
+
+// Only counters and allowlisted values enter this trace; never retain event payloads.
+export function createCodexStreamDiagnostics({ log, now = Date.now } = {}) {
+  const requestId = randomUUID();
+  const requestStartedAt = now();
+  let attempt = 0;
+  let state;
+  let ended = false;
+  const reset = () => {
+    state = {
+      request_id: requestId, attempt, phase: "dispatch", upstream_http_status: null,
+      headers_ms: null, preflight_ms: null, first_upstream_event_ms: null,
+      last_upstream_read_ms: null, last_downstream_write_ms: null,
+      upstream_bytes: 0, upstream_chunks: 0, downstream_bytes: 0, downstream_chunks: 0,
+      events: 0, terminal_event: null,
+    };
+    ended = false;
+  };
+  reset();
+  const elapsed = () => Math.max(0, now() - requestStartedAt);
+  const snapshot = () => ({ ...state, elapsed_ms: elapsed() });
+  const emit = (outcome, error) => {
+    const record = { ...snapshot(), outcome, ...(error ? classifyCodexStreamError(error) : {}) };
+    try {
+      if (outcome === "failed" && log?.errorLine) log.errorLine("", "!", `CODEX_STREAM ${JSON.stringify(record)}`);
+      else log?.info?.("CODEX_STREAM", JSON.stringify(record));
+    } catch { /* logging cannot break a stream */ }
+    return record;
+  };
+  const finish = (outcome, error) => {
+    if (ended) return;
+    ended = true;
+    return emit(CODEX_STREAM_DIAGNOSTICS.outcomes.includes(outcome) ? outcome : "failed", error);
+  };
+  const countBytes = (value) => Number.isSafeInteger(value?.byteLength) ? value.byteLength : 0;
+  return {
+    requestId,
+    snapshot,
+    beginAttempt() {
+      if (attempt && !ended) finish("retry");
+      attempt++;
+      reset();
+    },
+    phase(phase) {
+      if (!CODEX_STREAM_DIAGNOSTICS.phases.includes(phase)) return;
+      state.phase = phase;
+      if (phase === "streaming") state.preflight_ms = state.headers_ms === null ? null : elapsed() - state.headers_ms;
+    },
+    headers(status) {
+      state.phase = "headers";
+      state.headers_ms = elapsed();
+      state.upstream_http_status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+      emit("accepted");
+    },
+    upstream(chunk) {
+      state.last_upstream_read_ms = elapsed();
+      state.upstream_bytes += countBytes(chunk);
+      state.upstream_chunks++;
+    },
+    downstream(chunk) {
+      state.last_downstream_write_ms = elapsed();
+      state.downstream_bytes += countBytes(chunk);
+      state.downstream_chunks++;
+    },
+    event(type) {
+      state.first_upstream_event_ms ??= elapsed();
+      state.events++;
+      if (CODEX_STREAM_DIAGNOSTICS.terminalEvents.includes(type)) state.terminal_event = type;
+    },
+    finish,
+  };
 }

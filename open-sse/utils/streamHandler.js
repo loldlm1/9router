@@ -15,7 +15,7 @@ function getTimeString() {
  * @param {string} options.provider - Provider name
  * @param {string} options.model - Model name
  */
-export function createStreamController({ onDisconnect, onError, log, provider, model, reqTag = "" } = {}) {
+export function createStreamController({ onDisconnect, onError, log, provider, model, reqTag = "", diagnostics = null } = {}) {
   const abortController = new AbortController();
   const startTime = Date.now();
   let disconnected = false;
@@ -33,6 +33,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
   return {
     signal: abortController.signal,
     startTime,
+    diagnostics,
 
     isConnected: () => !disconnected,
 
@@ -40,6 +41,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
     handleDisconnect: (reason = "client_closed") => {
       if (disconnected) return;
       disconnected = true;
+      diagnostics?.finish("cancelled", Object.assign(new Error(), { code: "CLIENT_CANCELLED" }));
 
       // Debug-only: Responses API has no [DONE] sentinel, so codex/droid close the
       // socket on every completed request. "📊 done" is the authoritative outcome line.
@@ -57,6 +59,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
     handleComplete: () => {
       if (disconnected) return;
       disconnected = true;
+      diagnostics?.finish("eof");
 
       if (abortTimeout) {
         clearTimeout(abortTimeout);
@@ -68,6 +71,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
     handleError: (error) => {
       if (disconnected) return;
       disconnected = true;
+      diagnostics?.finish(error.name === "AbortError" ? "cancelled" : "failed", error);
 
       if (abortTimeout) {
         clearTimeout(abortTimeout);
@@ -79,7 +83,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
         return;
       }
 
-      logStream("✗", `ERROR: ${error.message}${error.stack ? `\n    ${error.stack}` : ""}`, true);
+      if (!diagnostics) logStream("✗", `ERROR: ${error.message}${error.stack ? `\n    ${error.stack}` : ""}`, true);
       onError?.(error);
     },
 
@@ -128,6 +132,7 @@ export function createDisconnectAwareStream(transformStream, streamController, o
           return;
         }
         controller.enqueue(value);
+        streamController.diagnostics?.downstream(value);
       } catch (error) {
         const wasConnected = streamController.isConnected();
         // Controller already closed = downstream ended; not an upstream error, skip noisy log.
@@ -204,7 +209,7 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     stallTimer = setTimeout(() => {
       stallTimer = null;
       dbg(tag, `STALL TIMEOUT ${stallTimeoutMs}ms | chunks=${chunkCount} | bytes=${totalBytes} | sinceLast=${Date.now() - lastChunkAt}ms`);
-      streamController.handleError?.(new Error("stream stall timeout"));
+      streamController.handleError?.(Object.assign(new Error("stream stall timeout"), { code: "STREAM_STALL_TIMEOUT" }));
       streamController.abort?.();
     }, stallTimeoutMs);
   };
@@ -213,6 +218,7 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   // Without this, abort/cancel/downstream-error paths leave the timer armed
   // and a stale abort could fire after the request has already ended.
   const wrappedController = {
+    diagnostics: streamController.diagnostics,
     signal: streamController.signal,
     startTime: streamController.startTime,
     isConnected: () => streamController.isConnected(),
@@ -223,6 +229,7 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   };
 
   armStall();
+  streamController.diagnostics?.phase("streaming");
   dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms`);
 
   const upstreamTap = new TransformStream({
@@ -252,4 +259,3 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     onAbortTerminal
   );
 }
-

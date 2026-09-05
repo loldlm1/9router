@@ -27,6 +27,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { createCodexStreamDiagnostics } from "open-sse/utils/codexObservability.js";
 
 /**
  * Handle chat completion request
@@ -222,6 +223,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   }
 
   const { provider, model } = modelInfo;
+  const streamDiagnostics = provider === "codex" ? createCodexStreamDiagnostics({ log }) : null;
 
   // Routing shown in the unified "▶" line (client model → provider/model)
 
@@ -294,6 +296,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         clientRawRequest,
         connectionId: credentials.connectionId,
         userAgent,
+        streamDiagnostics,
         apiKey,
         ccFilterNaming: !!chatSettings.ccFilterNaming,
         rtkEnabled: !!chatSettings.rtkEnabled,
