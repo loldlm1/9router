@@ -22,13 +22,16 @@ vi.mock("@/sse/utils/logger.js", () => ({ debug: vi.fn(), warn: vi.fn() }));
 const { markAccountUnavailable } = await import("../../src/sse/services/auth.js");
 
 describe("request-scoped fallback persistence", () => {
-  it("does not read or write account state for deterministic request errors", async () => {
+  it.each([
+    [400, "Unsupported reasoning effort ultra"],
+    [403, "GPT-6 Astra Pro mode is not available on this plan"],
+  ])("does not read or write account state for deterministic status %s errors", async (status, message) => {
     const result = await markAccountUnavailable(
       "conn-1",
-      400,
-      "Unsupported reasoning mode pro",
+      status,
+      message,
       "codex",
-      "gpt-5.6-sol-pro",
+      "gpt-6-astra-pro",
       null,
       "request",
     );

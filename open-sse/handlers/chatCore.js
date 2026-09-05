@@ -30,9 +30,9 @@ import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
-import { FALLBACK_SCOPE_REQUEST, normalizeFallbackScope } from "../services/fallbackScope.js";
+import { FALLBACK_SCOPE_REQUEST, isRequestScopedFallback, normalizeFallbackScope } from "../services/fallbackScope.js";
 import { formatCodexDecisionLog } from "../utils/codexObservability.js";
-import { isCodexAstraModel } from "../config/codexConstants.js";
+import { getCodexAstraRouteId, isCodexAstraModel } from "../config/codexConstants.js";
 
 function logCodexDecision({ log, provider, model, upstreamModel, requestBody, upstreamBody, compact, status, fallbackScope }) {
   if (provider !== "codex" || !log?.info) return;
@@ -41,7 +41,7 @@ function logCodexDecision({ log, provider, model, upstreamModel, requestBody, up
     upstreamModel,
     requestBody,
     upstreamBody,
-    aliasMode: getModelReasoningMode("cx", model),
+    aliasMode: getModelReasoningMode("cx", getCodexAstraRouteId(model)),
     compact,
     status,
     fallbackScope,
@@ -427,8 +427,26 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(errorStatus, errMsg, undefined, fallbackScope);
   }
 
-  // Handle 401/403 - try token refresh (skip for noAuth providers)
-  if (!executor.noAuth && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
+  // Astra entitlement failures are deterministic for the request and must not
+  // trigger token refresh or a second upstream attempt.
+  let authErrorPreview = null;
+  if (
+    !executor.noAuth &&
+    provider === "codex" &&
+    isCodexAstraModel(model) &&
+    providerResponse.status === HTTP_STATUS.FORBIDDEN
+  ) {
+    authErrorPreview = await parseUpstreamError(providerResponse.clone(), executor);
+  }
+  const shouldRefreshAuthError =
+    providerResponse.status === HTTP_STATUS.UNAUTHORIZED ||
+    (
+      providerResponse.status === HTTP_STATUS.FORBIDDEN &&
+      !isRequestScopedFallback(authErrorPreview?.fallbackScope)
+    );
+
+  // Handle account-scoped 401/403 - try token refresh (skip for noAuth providers)
+  if (!executor.noAuth && shouldRefreshAuthError) {
     try {
       // Mutate credentials after each successful refresh: rotating refresh_token
       // providers (xAI/grok-cli) issue a new RT on every refresh; without this,
@@ -467,7 +485,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Provider returned error
   if (!providerResponse.ok) {
     trackPendingRequest(model, provider, connectionId, false, true);
-    const { statusCode, message, resetsAtMs, fallbackScope } = await parseUpstreamError(providerResponse, executor);
+    const { statusCode, message, resetsAtMs, fallbackScope } =
+      authErrorPreview && providerResponse.status === HTTP_STATUS.FORBIDDEN
+        ? authErrorPreview
+        : await parseUpstreamError(providerResponse, executor);
     logCodexDecision({
       log, provider, model, upstreamModel,
       requestBody: body,

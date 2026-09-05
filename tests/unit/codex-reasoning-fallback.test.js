@@ -21,7 +21,7 @@ const loggerMocks = vi.hoisted(() => ({
 vi.mock("open-sse/index.js", () => ({}));
 vi.mock("@/sse/services/auth.js", () => authMocks);
 vi.mock("@/sse/services/model.js", () => ({
-  getModelInfo: vi.fn(async () => ({ provider: "codex", model: "gpt-5.6-sol-pro" })),
+  getModelInfo: vi.fn(async () => ({ provider: "codex", model: "gpt-6-astra-pro" })),
   getComboModels: vi.fn(async () => null),
 }));
 vi.mock("open-sse/handlers/chatCore.js", () => ({ handleChatCore: chatCoreMock }));
@@ -54,7 +54,7 @@ function request() {
   return new Request("http://127.0.0.1:20128/v1/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "cx/gpt-5.6-sol-pro", input: "Reply only OK" }),
+    body: JSON.stringify({ model: "cx/gpt-6-astra-pro", input: "Reply only OK" }),
   });
 }
 
@@ -75,24 +75,30 @@ describe("Codex deterministic reasoning fallback", () => {
   });
 
   it.each([
-    [400, "Unsupported reasoning mode pro", "request"],
-    [404, "Model not found", "request"],
-    [422, "Invalid reasoning effort", "request"],
-    [403, "Your plan does not include Pro model access", "request"],
-    [401, "token_invalid", "account"],
-    [429, "usage_limit_reached", "account"],
-    [503, "Selected model is at capacity", "account"],
-  ])("classifies status %s as %s scope", (status, message, scope) => {
-    expect(classifyCodexFallbackScope(status, message)).toBe(scope);
+    [400, "Unsupported reasoning mode pro", "unsupported_reasoning_mode", "gpt-6-astra", "request"],
+    [404, "Model not found", "model_not_found", "gpt-6-astra", "request"],
+    [422, "Invalid reasoning effort", "invalid_reasoning_effort", "gpt-6-astra", "request"],
+    [403, "Your plan does not include Pro model access", "", "gpt-6-astra-pro", "request"],
+    [403, "This model is still in rollout for your account", "model_not_available", "gpt-6-astra", "request"],
+    [403, "Pro reasoning mode is unsupported", "unsupported_reasoning_mode", "gpt-6-astra", "request"],
+    [403, "Pro", "", "gpt-6-astra-pro", "account"],
+    [403, "Forbidden", "insufficient_permissions", "gpt-6-astra", "account"],
+    [403, "Your plan does not include Pro model access", "", "gpt-5.6-sol-pro", "account"],
+    [400, "Malformed request body", "bad_request", "gpt-6-astra", "account"],
+    [401, "token_invalid", "token_invalid", "gpt-6-astra", "account"],
+    [429, "usage_limit_reached", "usage_limit_reached", "gpt-6-astra", "account"],
+    [503, "Selected model is at capacity", "model_at_capacity", "gpt-6-astra", "account"],
+  ])("classifies status %s for %s as %s scope", (status, message, code, model, scope) => {
+    expect(classifyCodexFallbackScope(status, message, code, model)).toBe(scope);
   });
 
   it("marks local reasoning validation failures as request-scoped 400s", () => {
     const executor = new CodexExecutor();
     try {
-      executor.transformRequest("gpt-5.6-sol", {
-        model: "gpt-5.6-sol",
+      executor.transformRequest("gpt-6-astra", {
+        model: "gpt-6-astra",
         input: "hi",
-        reasoning: { mode: "turbo" },
+        reasoning: { effort: "ultra" },
       }, true, {});
       throw new Error("expected transformRequest to fail");
     } catch (error) {
@@ -109,6 +115,41 @@ describe("Codex deterministic reasoning fallback", () => {
     expect(parsed).toMatchObject({ statusCode: 400, fallbackScope: "request" });
     expect(createErrorResult(parsed.statusCode, parsed.message, parsed.resetsAtMs, parsed.fallbackScope))
       .toMatchObject({ success: false, status: 400, fallbackScope: "request" });
+  });
+
+  it("preserves structured Astra entitlement errors as request scoped", async () => {
+    const executor = new CodexExecutor();
+    executor.transformRequest("gpt-6-astra-pro", {
+      model: "gpt-6-astra-pro",
+      input: "hi",
+    }, true, {});
+
+    const parsed = await parseUpstreamError(new Response(JSON.stringify({
+      error: {
+        message: "GPT-6 Astra Pro mode is not available on this plan",
+        code: "model_not_available",
+      },
+    }), { status: 403 }), executor);
+
+    expect(parsed).toMatchObject({
+      statusCode: 403,
+      message: "GPT-6 Astra Pro mode is not available on this plan",
+      fallbackScope: "request",
+    });
+  });
+
+  it("keeps invalid-token authorization failures account scoped", async () => {
+    const executor = new CodexExecutor();
+    executor.transformRequest("gpt-6-astra", {
+      model: "gpt-6-astra",
+      input: "hi",
+    }, true, {});
+
+    const parsed = await parseUpstreamError(new Response(JSON.stringify({
+      error: { message: "The access token is invalid", code: "token_invalid" },
+    }), { status: 403 }), executor);
+
+    expect(parsed).toMatchObject({ statusCode: 403, fallbackScope: "account" });
   });
 
   it("returns a request-scoped error without locking or rotating accounts", async () => {
@@ -152,7 +193,7 @@ describe("Codex deterministic reasoning fallback", () => {
       429,
       "usage_limit_reached",
       "codex",
-      "gpt-5.6-sol-pro",
+      "gpt-6-astra-pro",
       undefined,
       "account",
     );

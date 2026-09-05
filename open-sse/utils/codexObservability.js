@@ -1,15 +1,29 @@
 import { FALLBACK_SCOPE_ACCOUNT, normalizeFallbackScope } from "../services/fallbackScope.js";
+import { getCodexAstraRouteId, isCodexAstraModel } from "../config/codexConstants.js";
 
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+const ASTRA_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 const REASONING_MODES = new Set(["standard", "pro"]);
 
 function safeModelId(value) {
   if (typeof value !== "string" || !value) return "unknown";
-  return value.replace(/[^a-zA-Z0-9._:/-]/g, "?").slice(0, 128) || "unknown";
+  return value.replace(/[^a-zA-Z0-9._:/()-]/g, "?").slice(0, 128) || "unknown";
 }
 
 function safeReasoningValue(value, allowed, fallback) {
   return typeof value === "string" && allowed.has(value) ? value : fallback;
+}
+
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+function getAstraSuffixEffort(modelId) {
+  if (!isCodexAstraModel(modelId)) return null;
+  const parenthesized = modelId.match(/\(([^()]*)\)\s*$/);
+  if (parenthesized) return parenthesized[1];
+
+  const routeId = getCodexAstraRouteId(modelId);
+  if (modelId === routeId || !modelId.startsWith(`${routeId}-`)) return null;
+  return modelId.slice(routeId.length + 1);
 }
 
 /**
@@ -32,16 +46,34 @@ export function formatCodexDecisionLog({
   const effectiveReasoning = upstreamBody?.reasoning && typeof upstreamBody.reasoning === "object"
     ? upstreamBody.reasoning
     : {};
-  const rawRequestedMode = requestedReasoning.mode || aliasMode;
-  const rawRequestedEffort = requestedReasoning.effort || requestBody?.reasoning_effort;
-  const requestedMode = safeReasoningValue(rawRequestedMode, REASONING_MODES, rawRequestedMode ? "invalid" : "standard");
+  const hasRequestedMode = hasOwn(requestedReasoning, "mode") || aliasMode != null;
+  const rawRequestedMode = hasOwn(requestedReasoning, "mode")
+    ? requestedReasoning.mode
+    : aliasMode;
+  const suffixEffort = getAstraSuffixEffort(requestedModel);
+  const hasRequestedEffort =
+    hasOwn(requestedReasoning, "effort") ||
+    hasOwn(requestBody || {}, "reasoning_effort") ||
+    suffixEffort != null;
+  const rawRequestedEffort = hasOwn(requestedReasoning, "effort")
+    ? requestedReasoning.effort
+    : hasOwn(requestBody || {}, "reasoning_effort")
+      ? requestBody.reasoning_effort
+      : suffixEffort;
+  const requestedMode = safeReasoningValue(rawRequestedMode, REASONING_MODES, hasRequestedMode ? "invalid" : "standard");
   const effectiveMode = safeReasoningValue(effectiveReasoning.mode, REASONING_MODES, "standard");
+  const requestedEffortSet = isCodexAstraModel(requestedModel)
+    ? ASTRA_REASONING_EFFORTS
+    : REASONING_EFFORTS;
+  const effectiveEffortSet = isCodexAstraModel(upstreamBody?.model || upstreamModel)
+    ? ASTRA_REASONING_EFFORTS
+    : REASONING_EFFORTS;
   const requestedEffort = safeReasoningValue(
     rawRequestedEffort,
-    REASONING_EFFORTS,
-    rawRequestedEffort ? "invalid" : "default",
+    requestedEffortSet,
+    hasRequestedEffort ? "invalid" : "default",
   );
-  const effectiveEffort = safeReasoningValue(effectiveReasoning.effort, REASONING_EFFORTS, "unknown");
+  const effectiveEffort = safeReasoningValue(effectiveReasoning.effort, effectiveEffortSet, "unknown");
   const numericStatus = Number(status);
   const safeStatus = Number.isInteger(numericStatus) && numericStatus >= 100 && numericStatus <= 599
     ? String(numericStatus)

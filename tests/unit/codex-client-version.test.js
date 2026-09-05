@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  CODEX_ASTRA_MODEL_ID,
   CODEX_CLIENT_VERSION,
   CODEX_ORIGINATOR,
   CODEX_USER_AGENT,
+  getCodexAstraRouteId,
+  isCodexAstraModel,
 } from "../../open-sse/config/codexConstants.js";
 import { PROVIDERS } from "../../open-sse/config/providers.js";
 import codexImageProvider from "../../open-sse/handlers/imageProviders/codex.js";
@@ -43,5 +46,16 @@ describe("Codex client identity", () => {
       "utf8",
     );
     expect(catalogSource).toContain("client_version=${CODEX_CLIENT_VERSION}");
+  });
+
+  it.each([
+    ["gpt-6-astra", "gpt-6-astra"],
+    ["gpt-6-astra(max)", "gpt-6-astra"],
+    ["gpt-6-astra-pro-low", "gpt-6-astra-pro"],
+    ["gpt-6-astra-review(turbo)", "gpt-6-astra-review"],
+  ])("resolves Astra route metadata for %s", (model, route) => {
+    expect(isCodexAstraModel(model)).toBe(true);
+    expect(getCodexAstraRouteId(model)).toBe(route);
+    expect(route.startsWith(CODEX_ASTRA_MODEL_ID)).toBe(true);
   });
 });

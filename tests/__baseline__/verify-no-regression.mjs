@@ -5,16 +5,22 @@ import { readFileSync } from "fs";
 
 const knownFails = new Set(
   readFileSync(new URL("./known-fails.txt", import.meta.url), "utf8")
-    .split("\n").map(s => s.trim()).filter(Boolean)
+    .split("\n").map(s => s.trim()).filter(s => s && !s.startsWith("#"))
 );
 
 const resultsPath = process.argv[2];
 if (!resultsPath) { console.error("Missing results.json path"); process.exit(2); }
 
 const r = JSON.parse(readFileSync(resultsPath, "utf8"));
+const relativeTestPath = (name) => {
+  const normalized = String(name || "").replaceAll("\\", "/");
+  const marker = "/tests/";
+  const index = normalized.lastIndexOf(marker);
+  return index >= 0 ? `tests/${normalized.slice(index + marker.length)}` : normalized;
+};
 const nowFails = r.testResults.flatMap(f =>
   f.assertionResults.filter(a => a.status === "failed")
-    .map(a => f.name.split("/app/")[1] + " :: " + a.fullName)
+    .map(a => relativeTestPath(f.name) + " :: " + a.fullName)
 );
 
 // Regression = fail bây giờ NHƯNG không có trong baseline known-fails

@@ -9,3 +9,16 @@ export function isCodexAstraModel(modelId) {
     || modelId.startsWith(`${CODEX_ASTRA_MODEL_ID}-`)
     || modelId.startsWith(`${CODEX_ASTRA_MODEL_ID}(`);
 }
+
+export function getCodexAstraRouteId(modelId) {
+  if (!isCodexAstraModel(modelId)) return modelId;
+  const clean = modelId.replace(/\([^()]*\)\s*$/, "");
+  for (const routeId of [
+    `${CODEX_ASTRA_MODEL_ID}-review`,
+    `${CODEX_ASTRA_MODEL_ID}-pro`,
+    CODEX_ASTRA_MODEL_ID,
+  ]) {
+    if (clean === routeId || clean.startsWith(`${routeId}-`)) return routeId;
+  }
+  return clean;
+}

@@ -1,5 +1,6 @@
 import { BaseExecutor } from "./base.js";
 import { CODEX_DEFAULT_INSTRUCTIONS } from "../config/codexInstructions.js";
+import { isCodexAstraModel } from "../config/codexConstants.js";
 import { PROVIDERS } from "../config/providers.js";
 import {
   refreshProviderCredentials,
@@ -29,12 +30,24 @@ const CODEX_SSE_USER_OUTPUT_PATTERNS = [
 ];
 const CODEX_SSE_PEEK_BYTES = 256 * 1024;
 const CODEX_MODEL_CAPACITY_MESSAGE = "Selected model is at capacity. Please try a different model.";
-const CODEX_REQUEST_SCOPE_STATUSES = new Set([400, 404, 422]);
-const CODEX_REQUEST_SCOPE_PATTERNS = [
-  /(?:unsupported|invalid).*(?:reasoning|effort|mode|model)/i,
-  /(?:reasoning|effort|mode|model).*(?:unsupported|invalid|not available|not supported|does not support)/i,
-  /(?:entitlement|subscription|plan).*(?:pro|reasoning|model)/i,
-  /(?:pro|reasoning|model).*(?:entitlement|subscription|plan|required|access)/i,
+const CODEX_INVALID_REQUEST_STATUSES = new Set([400, 404, 422]);
+const CODEX_MODEL_REASONING_ERROR_PATTERNS = [
+  /(?:unsupported|invalid|unknown|not found|not available).*(?:reasoning|effort|mode|model)/i,
+  /(?:reasoning|effort|mode|model).*(?:unsupported|invalid|unknown|not found|not available|not supported|does not support)/i,
+];
+const CODEX_MODEL_REASONING_CODE_PATTERNS = [
+  /^(?:invalid|unsupported|unknown)_(?:model|reasoning|reasoning_effort|reasoning_mode)$/i,
+  /^model_(?:not_found|not_available|unsupported|unknown)$/i,
+];
+const CODEX_ASTRA_ACCESS_PATTERNS = [
+  /(?:gpt-6-astra|model|pro mode|reasoning mode).*(?:not available|unavailable|not enabled|not supported|unsupported|does not support|no access|access denied|entitlement|subscription|plan|required|rollout)/i,
+  /(?:access|entitlement|subscription|plan|rollout).*(?:gpt-6-astra|model|pro mode|reasoning mode)/i,
+];
+const CODEX_ASTRA_ACCESS_CODE_PATTERNS = [
+  /^(?:invalid|unsupported)_(?:model|reasoning_effort|reasoning_mode)$/i,
+  /^model_(?:not_available|access_denied|entitlement_required)$/i,
+  /^(?:entitlement|subscription|plan)_(?:required|missing|unsupported)$/i,
+  /^(?:pro_mode|reasoning_mode)_(?:not_available|not_supported|requires_pro)$/i,
 ];
 
 // Server-generated item id prefixes that Codex /responses cannot resolve when store=false
@@ -183,11 +196,30 @@ function splitReasoningEffortSuffix(modelId) {
   return { modelId, effort: null, hasEffort: false };
 }
 
-export function classifyCodexFallbackScope(status, message = "") {
-  if (CODEX_REQUEST_SCOPE_STATUSES.has(Number(status))) return FALLBACK_SCOPE_REQUEST;
-  if (Number(status) === 403 && CODEX_REQUEST_SCOPE_PATTERNS.some((pattern) => pattern.test(String(message)))) {
+export function classifyCodexFallbackScope(status, message = "", code = "", modelId = "") {
+  const numericStatus = Number(status);
+  const messageText = String(message || "");
+  const codeText = String(code || "");
+
+  if (
+    CODEX_INVALID_REQUEST_STATUSES.has(numericStatus) &&
+    (
+      CODEX_MODEL_REASONING_ERROR_PATTERNS.some((pattern) => pattern.test(messageText)) ||
+      CODEX_MODEL_REASONING_CODE_PATTERNS.some((pattern) => pattern.test(codeText))
+    )
+  ) {
     return FALLBACK_SCOPE_REQUEST;
   }
+
+  if (
+    numericStatus === HTTP_STATUS.FORBIDDEN &&
+    isCodexAstraModel(modelId) &&
+    (
+      CODEX_ASTRA_ACCESS_PATTERNS.some((pattern) => pattern.test(messageText)) ||
+      CODEX_ASTRA_ACCESS_CODE_PATTERNS.some((pattern) => pattern.test(codeText))
+    )
+  ) return FALLBACK_SCOPE_REQUEST;
+
   return FALLBACK_SCOPE_ACCOUNT;
 }
 
@@ -235,6 +267,37 @@ function findNestedMessage(value, depth = 0) {
   return null;
 }
 
+function findNestedErrorCode(value, depth = 0) {
+  if (!value || depth > 6 || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedErrorCode(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const key of ["code", "error_code", "errorCode"]) {
+    if (typeof value[key] === "string" && value[key].trim()) return value[key];
+  }
+  for (const child of Object.values(value)) {
+    const found = findNestedErrorCode(child, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function parseCodexErrorBody(bodyText) {
+  try {
+    const value = JSON.parse(bodyText);
+    return {
+      message: findNestedMessage(value),
+      code: findNestedErrorCode(value),
+    };
+  } catch {
+    return { message: null, code: null };
+  }
+}
+
 function extractSseErrorMessage(text, fallback) {
   const exact = text?.match(/Selected model is at capacity\. Please try a different model\./i)?.[0];
   if (exact) return exact;
@@ -276,6 +339,8 @@ export class CodexExecutor extends BaseExecutor {
     super("codex", PROVIDERS.codex);
     this._currentSessionId = null;
     this._isCompact = false;
+    this._requestedModelId = null;
+    this._upstreamModelId = null;
   }
 
   /**
@@ -470,9 +535,17 @@ export class CodexExecutor extends BaseExecutor {
       } catch { /* fall through to default */ }
     }
     const parsed = super.parseError(response, bodyText);
+    const details = parseCodexErrorBody(bodyText);
+    const message = details.message || parsed.message || bodyText;
     return {
       ...parsed,
-      fallbackScope: classifyCodexFallbackScope(parsed.status || response.status, parsed.message || bodyText),
+      message,
+      fallbackScope: classifyCodexFallbackScope(
+        parsed.status || response.status,
+        message,
+        details.code,
+        this._requestedModelId || this._upstreamModelId,
+      ),
     };
   }
 
@@ -528,6 +601,8 @@ export class CodexExecutor extends BaseExecutor {
     const supportedModes = getModelReasoningModes("cx", requested.modelId);
     const aliasMode = getModelReasoningMode("cx", requested.modelId);
     body.model = getModelUpstreamId("cx", requested.modelId);
+    this._requestedModelId = requested.modelId;
+    this._upstreamModelId = body.model;
 
     // Priority: explicit reasoning.effort > reasoning_effort > suffix > default.
     const reasoning = isObjectRecord(body.reasoning) ? body.reasoning : {};
