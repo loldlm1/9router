@@ -1,7 +1,7 @@
 # Plan: Codex Long-Task Stream Reliability
 
 **Generated**: 2026-09-05
-**Status**: Execution authorized; Sprint 1 validated, subsequent sprint gates pending
+**Status**: Execution authorized; S1 committed (`8dc5f120`); S2 validated (63 tests), commit gate next
 **Estimated complexity**: High
 **Sprints**: 5, executed in order
 **Source review baseline**: `9f57d45c` (`docs: finalize Astra VPS handoff`)
@@ -451,10 +451,10 @@ sprint remains applied. Preserve the pre-sprint deployment artifact separately.
 
 ### Sprint 1 Gate
 
-- [ ] Tasks complete; validation and residual risks recorded.
-- [ ] Exactly one Sprint 1 commit created with the proposed message.
-- [ ] `S1_BASE`, commit SHA, and rollback instructions recorded.
-- [ ] Sprint 2 has not started before this gate passes.
+- [x] Tasks complete; validation and residual risks recorded.
+- [x] Exactly one Sprint 1 commit created with the proposed message.
+- [x] `S1_BASE`, commit SHA, and rollback instructions recorded.
+- [x] Sprint 2 has not started before this gate passes.
 
 ## Sprint 2: Make Responses Terminal Outcomes Correct
 
@@ -530,8 +530,8 @@ unit to return to Sprint 1; later dependent sprints must be reverted first.
 
 ### Sprint 2 Gate
 
-- [ ] All terminal, framing, outcome, and cleanup cases pass.
-- [ ] Validation evidence and residual risks recorded.
+- [x] All terminal, framing, outcome, and cleanup cases pass (63 tests, six suites).
+- [x] Validation evidence and residual risks recorded in `docs/codex-stream-reliability.md`.
 - [ ] Exactly one Sprint 2 commit created; rollback point recorded.
 - [ ] Sprint 3 has not started before this gate passes.
 

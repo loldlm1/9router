@@ -337,6 +337,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       if (onDisconnect) onDisconnect(reason);
     },
     onError: () => trackPendingRequest(model, provider, connectionId, false),
+    onComplete: stream && clientRequestedStreaming && sourceFormat === FORMATS.OPENAI_RESPONSES && targetFormat === FORMATS.OPENAI_RESPONSES
+      ? () => trackPendingRequest(model, provider, connectionId, false) : null,
     log, provider, model, reqTag, diagnostics: streamDiagnostics
   });
 

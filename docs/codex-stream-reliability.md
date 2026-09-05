@@ -33,6 +33,25 @@ a health check does not validate streaming.
 | Sprint | Validation | Rollback base |
 | --- | --- | --- |
 | 1 | 38 tests passed across diagnostics, capacity, fallback, and native reasoning; diagnostics rerun passed after always-visible failure logging | `9f57d45c` |
+| 2 | 63 tests passed across terminal/framing, abort/outcome, diagnostics, lifecycle, native reasoning, and non-streaming suites; whitespace check passed | `8dc5f120` |
+
+Sprint 1 commit: `8dc5f120`. Sprint 2 commit uses
+`fix(codex): unify Responses terminal handling and outcomes`.
+
+Responses passthrough now uses the same framed stream path for Codex, Droid,
+and other user agents. Only a complete, valid terminal settles successfully.
+Failed/incomplete events retain upstream reasons and usage; premature EOF,
+malformed frames, or resets yield one failure. Failure reuses the known response
+ID and next sequence number, or uses a generic `error` before an ID exists.
+Completed output cannot be followed by a generated failure. Terminal callbacks,
+pending release, cancellation cleanup, and ordered detail writes settle once.
+Each pending event is bounded by `RESPONSES_MAX_EVENT_BYTES` (16 MiB default).
+
+The Sprint 2 command is the plan's six-suite command, with `RUN_REAL=0` and an
+isolated temporary `DATA_DIR`. These tests use synthetic data and mocked
+persistence. The deployed Codex parser and VPS path still require validation;
+truthful failure reporting cannot prevent an upstream socket reset. Roll back
+dependent sprints first, then revert Sprint 2 as a unit to `8dc5f120`.
 
 Sprint 1 also plumbs diagnostics through `BaseExecutor`, the chat entry point,
 and stream factories so account fallback shares a request ID and each fetch gets

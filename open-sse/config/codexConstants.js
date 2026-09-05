@@ -9,7 +9,7 @@ export const CODEX_STREAM_DIAGNOSTICS = Object.freeze({
   outcomes: ["accepted", "retry", "eof", "completed", "failed", "incomplete", "cancelled"],
   terminalEvents: ["response.completed", "response.done", "response.failed", "response.incomplete", "error"],
   errorNames: ["Error", "TypeError", "AbortError", "TimeoutError"],
-  errorCodes: ["UND_ERR_SOCKET", "UND_ERR_BODY_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_CONNECT_TIMEOUT", "ECONNRESET", "ETIMEDOUT", "EPIPE", "STREAM_STALL_TIMEOUT", "CLIENT_CANCELLED"],
+  errorCodes: ["UND_ERR_SOCKET", "UND_ERR_BODY_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_CONNECT_TIMEOUT", "ECONNRESET", "ETIMEDOUT", "EPIPE", "STREAM_STALL_TIMEOUT", "STREAM_PROTOCOL_ERROR", "CLIENT_CANCELLED"],
 });
 
 export function isCodexAstraModel(modelId) {
