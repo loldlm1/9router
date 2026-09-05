@@ -1,6 +1,8 @@
 # v0.5.65 (2026-09-03)
 
 ## Features
+- **Codex**: add account-aware GPT-6 Astra, GPT-6 Astra Pro, and GPT-6 Astra Review routes with standard/pro reasoning modes and low-to-max effort support
+- **VPS**: add `npm run vps -- --port <port>` to refresh dependencies and rebuild only when needed, load the project `.env`, and start the hardened standalone server without Docker
 - **Fetch**: add Ollama Cloud web fetch provider
 - **Gemini / Antigravity**: add Gemini 3.8 Flash support and bump IDE fingerprint to 2.11.0
 - **Claude**: add Claude Fable 5.1 support (adaptive thinking with `output_config.effort`), bump Claude Code fingerprint to 2.1.258 for new-model access
@@ -12,6 +14,7 @@
 - **i18n**: complete Indonesian translation (1391 keys)
 
 ## Fixes
+- **Codex**: keep Astra model, reasoning-mode, and entitlement rejections request-scoped so an unavailable route does not disable an otherwise valid account
 - **Security**: close SSRF guard bypasses in `ssrfGuard.js` (alternate IPv6 encodings, hostname trailing dots, wildcard DNS resolution check, safe redirect handling) (#3714)
 - **Model markers**: strip the `[1m]` context marker Claude Code appends to model names (`claude-opus-5[1m]`) preventing model resolution failures (#3690)
 - **Claude**: drop `server_tool_use` blocks carrying foreign IDs to avoid Anthropic 400 rejections; never anchor cache breakpoints on `defer_loading` tools (#3567)

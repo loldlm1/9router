@@ -1218,9 +1218,18 @@ Model: cc/claude-opus-4-7
 
 ### VPS Deployment
 
+Update and start an existing VPS checkout:
+
+```bash
+git pull --ff-only origin master
+npm run vps -- --port 20128
+```
+
+For a fresh installation:
+
 ```bash
 # Clone and install
-git clone https://github.com/decolua/9router.git
+git clone https://github.com/loldlm1/9router.git
 cd 9router
 npm install
 
